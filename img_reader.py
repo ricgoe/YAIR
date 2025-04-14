@@ -26,9 +26,9 @@ def filtered(arr):
 
 
 path = 'images/lilla.png'
-path = 'images/HSD_duesseldorf_IMG_9911.jpg'
+path = 'images/HSD_duesseldorf_IMG_9904.jpg'
 path_2 = 'images/349.png'
-path_2 = 'images/HSD_duesseldorf_IMG_9916.jpg'
+path_2 = 'images/HSD_duesseldorf_IMG_9904.jpg'
 
 ct = ColorThief(path)
 ct2 = ColorThief(path_2)
@@ -48,7 +48,7 @@ hls_f2 = filtered(hls_img2)
 hist = cv.calcHist([hls_f], [0], None, [180], [0, 181])
 hist2 = cv.calcHist([hls_f2], [0], None, [180], [0, 181])
 
-print('hist', cv.compareHist(hist, hist2, cv.HISTCMP_CHISQR))
+print('hist', cv.compareHist(hist, hist2, cv.HISTCMP_INTERSECT))
 # print(channels)
 
 # hist = cv.calcHist(channels, [0], None, [100], [0, 361])
@@ -63,15 +63,17 @@ print('hist', cv.compareHist(hist, hist2, cv.HISTCMP_CHISQR))
 # plt.plot(hist2)
 palette = ct.get_palette(color_count=5)
 palette2 = ct2.get_palette(color_count=5)
-colos_hls = [np.asarray(colorsys.rgb_to_hls(*i)) for i in palette]
-colos_hls2 = [np.asarray(colorsys.rgb_to_hls(*i)) for i in palette2]
-print(colos_hls)
-print(colos_hls2)
+# TODO img = np.uint8([[color_rgb]])
+# colos_hls = [np.asarray(colorsys.rgb_to_hls(*i)) for i in palette]
+# colos_hls2 = [np.asarray(colorsys.rgb_to_hls(*i)) for i in palette2]
 
-for coloro1, coloro2 in zip(colos_hls, colos_hls2):
-    print(np.linalg.norm(coloro1 - coloro2))
+# print(colos_hls)
+# print(colos_hls2)
+
+# for coloro1, coloro2 in zip(colos_hls, colos_hls2):
+#     print(np.linalg.norm(coloro1 - coloro2))
 
 
 plt.imshow([[palette[i] for i in range(5)]])
-plt.imshow([[palette2[i] for i in range(5)]])
+#plt.imshow([[palette2[i] for i in range(5)]])
 plt.show()
