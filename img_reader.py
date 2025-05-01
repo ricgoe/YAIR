@@ -203,7 +203,7 @@ class ImgColSimGet:
                         h1, h2, l1, l2, s1, s2 = self.shift_arr(self.current_images[1], self.current_images[3])
                         sim_h, sim_l, sim_s = self.calculate_similarity(h1, h2, l1, l2, s1, s2)
                         #self.show_all_hists(self.current_images[0], self.current_images[2], h1, h2, l1, l2, s1, s2)
-                        #self.show_histograms(self.current_images[0], self.current_images[2], h1, h2, l1, l2, s1, s2, sim_h, sim_l, sim_s, in_index)
+                        self.show_histograms(self.current_images[0], self.current_images[2], h1, h2, l1, l2, s1, s2, sim_h, sim_l, sim_s, in_index)
                         self.simmatrix[out_index, in_index] = (6*sim_h+sim_l+2*sim_s)/9
                     print(f'Image {out_index+1} done')
                     
