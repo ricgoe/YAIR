@@ -72,7 +72,7 @@ class ImgColSimGet:
         mask = (arr[:,:,1] > 20) & (arr[:,:,2] > 50)
         return arr[mask]
 
-
+    @DeprecationWarning
     def calculate_circ_mean(self, weights: np.ndarray):
         radians = np.arange(self.h_bins)*(360/self.h_bins)*(np.pi/180) # list of n_bins radians for each hue
         sin_sum = np.sum(weights*np.sin(radians))
@@ -142,7 +142,7 @@ class ImgColSimGet:
         return sim_h, sim_l, sim_s
         #return np.max([sim_1, sim_2])
 
-
+    @DeprecationWarning
     def cos_sim(self, arr1: np.ndarray, arr2: np.ndarray):
         
         return np.dot(arr1.flatten(), arr2.flatten())/(np.linalg.norm(arr1)*np.linalg.norm(arr2))
@@ -219,87 +219,3 @@ class ImgColSimGet:
 if __name__ == "__main__":
     imganalyse = ImgColSimGet('cifar', mode = ('rgb_array', b'data'))
     imganalyse.anlz_cycle()
-
-    
-    
-    # def kl_divergence(P, Q, epsilon=1e-10):
-    #     P = np.array(P, dtype=np.float64) + epsilon
-    #     Q = np.array(Q, dtype=np.float64) + epsilon
-    #     P /= P.sum()
-    #     Q /= Q.sum()
-    #     return np.sum(P * np.log(P / Q))
-
-    # #path = 'images/lilla.png'
-    # path = 'images/HSD_duesseldorf_IMG_9904.jpg'
-    # #path_2 = 'images/349.png'
-    # path_2 = 'images/HSD_duesseldorf_IMG_9919.jpg'
-
-    # # ct = ColorThief(path)
-    # # ct2 = ColorThief(path_2)
-
-    # rgb_img, hls_img = img_read(path)
-    # rgb_img2, hls_img2 = img_read(path_2)
-
-    # hls_f = hls_img#filter_l_s(hls_img)
-    # hls_f2 = hls_img2#filter_l_s(hls_img2)
-    
-    
-    # his1 = cv.calcHist([hls_f], [0], None, [90], [0, 181])
-    # his2 = cv.calcHist([hls_f2], [0], None, [90], [0, 181])
-    # shifted_arrs = shift_arr(hls_f, hls_f2)
-    # simi, cos_simi = calculate_similarity(*shifted_arrs)
-    # print(simi)
-    # show_histograms(rgb_img, rgb_img2, his1, his2, *shifted_arrs, simi, cos_simi)
-
-    # channels = cv.split(hlsss_filtered)
-    # channels2 = cv.split(hlsss2_filtered)
-
-    # histogram, bin_edges = np.histogram(hls_f[:,0], bins=180, range=(0, 181), density=True)
-    # histogram2, bin_edges2 = np.histogram(hls_f2[:,0], bins=180, range=(0, 181), density=True)
-
-    # hist = cv.calcHist([hls_f], [0], None, [180], [0, 181])
-    # hist_shift = np.roll(hist, len(hist)//2)
-
-
-    # hist2 = cv.calcHist([hls_f2], [0], None, [180], [0, 181])
-    # hist2_shift = cv.calcHist([hls_f2], [0], None, [180], [0, 181])
-
-    # sim = 'hist', cv.compareHist(hist, hist2, cv.HISTCMP_INTERSECT)
-    # sim_shift = 'hist_shift', cv.compareHist(hist_shift, hist2_shift, cv.HISTCMP_INTERSECT)
-    # print(channels)
-
-    # hist = cv.calcHist(channels, [0], None, [100], [0, 361])
-    # hist2 = cv.calcHist(channels2, [0], None, [100], [0, 361])
-
-
-    # kl_divergence = np.sum(rel_entr(histogram, histogram2))
-    # print(kl_divergence)
-    # hlsss[:,:,0] += 20
-
-    # plt.plot(hist)
-    # plt.plot(hist2)
-    # palette = ct.get_palette(color_count=5)
-    # palette2 = ct2.get_palette(color_count=5)
-    # TODO img = np.uint8([[color_rgb]])
-    # colos_hls = [np.asarray(colorsys.rgb_to_hls(*i)) for i in palette]
-    # colos_hls2 = [np.asarray(colorsys.rgb_to_hls(*i)) for i in palette2]
-
-    # print(colos_hls)
-    # print(colos_hls2)
-
-    # for coloro1, coloro2 in zip(colos_hls, colos_hls2):
-    #     print(np.linalg.norm(coloro1 - coloro2))
-
-
-    # plt.imshow([[palette[i] for i in range(5)]])
-    #plt.imshow([[palette2[i] for i in range(5)]])
-    # plt.show()
-    
-    
-    
-    # glob
-    # for i, 999
-        # for j = i+1, 9999
-    # TODO CIFAR-10 for all images with n-bins as hyper param
-    # TODO tsne = TSNE(metric='precomputed')
-    # TODO tsne with sim 1-sim_matrix 
