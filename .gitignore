@@ -1,0 +1,9 @@
+.venv
+images
+.faafo
+matrices
+prasi
+.DS_Store
+ds_*
+__pycache__
+res
