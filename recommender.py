@@ -5,7 +5,7 @@ import torch
 from autoencoder.autoenc import AutoEncoder
 from torchvision.models.feature_extraction import create_feature_extractor
 import matplotlib.pyplot as plt
-
+import os
 
 class ImageRecomender:
     def __init__(self, ae_path: Path, struct_ds_path: Path = None, col_ds_path: Path = None, struct_ds_size: tuple[int, int] = (32,32)):
@@ -18,7 +18,12 @@ class ImageRecomender:
         self._img_to_compare_color_vec = None
         self._img_to_compare_struct_vec = None
         self._img_similar = None
-        self._device = 'mps' if torch.mps.is_available() else 'cpu'
+        if os.name == 'nt' and torch.cuda.is_available():
+            self._device = 'cuda'
+        elif torch.mps.is_available():
+            self._device = 'mps'
+        else: 
+            self._device = 'cpu'
         self._model = torch.load(str(self._ae_path), weights_only=False, map_location=torch.device(self._device))
         self._return_nodes: dict = {"encoder.4": "encoding_layer", "decoder.5": "decoding_layer"}
         self._feature_extract = create_feature_extractor(self._model, return_nodes=self._return_nodes)
@@ -48,7 +53,7 @@ class ImageRecomender:
         with torch.no_grad():  # No gradients needed for evaluation
             self._img_to_compare_grey_struct = self._img_to_compare_grey_struct.to(self._device)
             outputs = self._feature_extract(self._img_to_compare_grey_struct)
-        self._img_to_compare_struct_vec = outputs["decoding_layer"].view(self._struct_ds_size[0], self._struct_ds_size[1]).cpu()
+        self._img_to_compare_struct_vec = outputs["encoding_layer"].cpu()#.view(self._struct_ds_size[0], self._struct_ds_size[1]).cpu()
         
     def gen_hist(self):
         pass
