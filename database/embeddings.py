@@ -15,7 +15,7 @@ class Embedder:
         self._return_nodes: dict = {"encoder.4": "encoding_layer", "decoder.5": "decoding_layer"}
         self._feature_extract = create_feature_extractor(self._model, return_nodes=self._return_nodes)
        
-    def process(self, img) -> None | torch.Tensor:
+    def process(self, img_path) -> torch.Tensor:
         img = cv.imread(str(img),cv.IMREAD_GRAYSCALE)
         if img is None:
             raise UnidentifiedImageError
@@ -24,9 +24,9 @@ class Embedder:
         img_resized = np.clip(img_resized, 0, 1)
         return torch.from_numpy(np.reshape(img_resized, (1, 32*32)))
     
-    def gen_embedding(self, img) -> torch.Tensor:
+    def gen_embedding(self, img_path: str) -> torch.Tensor:
         with torch.no_grad():  # No gradients needed for evaluation
-            processed_img = self.process(img).to(self._device)
+            processed_img = self.process(img_path).to(self._device)
             outputs: dict[str, torch.Tensor] = self._feature_extract(processed_img)
         return outputs["encoding_layer"].cpu()#.view(self._struct_ds_size[0], self._struct_ds_size[1]).cpu()
         

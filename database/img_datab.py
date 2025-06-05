@@ -1,30 +1,24 @@
 from pathlib import Path
-from sqlmodel import SQLModel, Field, create_engine, Session, select
+from sqlmodel import SQLModel, create_engine, Session
+from ImgModel import ImgEntry
 from PIL import Image, UnidentifiedImageError
 from embeddings import Embedder
+from colorvec1 import ColorVecCalculator
 from faiss import IndexFlatIP, IndexFlatL2, IndexIDMap
 import faiss
 from autoenc import AutoEncoder
 from tqdm import tqdm
-
-
+import numpy as np
 
 DATA_LOCATION = Path("/Volumes/Big Data/data/image_data")
-
-
-class ImgEntry(SQLModel, table = True):
-    id: int | None = Field(default=None, primary_key=True)
-    path: str
-    width: int
-    height: int
-    #faiss_id: int
 
 class ImgDBMaker:
     def __init__(self, db_path: str, img_drive_path: Path):
         self.engine = create_engine(f"sqlite:///{db_path}")
-        self.idx = IndexIDMap(IndexFlatIP(64))
-        self.embedder = Embedder(model_path="/Users/richardgox/Documents/4. Semester/GuglLens/database/autoencoder_full_131_best.pth")
         SQLModel.metadata.create_all(self.engine)
+        self.idx = IndexIDMap(IndexFlatIP(26))
+        self.embedder = Embedder(model_path="/Users/richardgox/Documents/4. Semester/GuglLens/database/autoencoder_full_131_best.pth")
+        self.colorvec = ColorVecCalculator()
 
     def populate_db(self, n=None):
         i = 0
@@ -50,23 +44,19 @@ class ImgDBMaker:
                 session.add(img)
                 session.commit()
                 session.refresh(img)
-            embedding = self.embedder.gen_embedding(img.path)
-            self.idx.add_with_ids(embedding, img.id)
-        except Exception:
+            # embedding = self.embedder.gen_embedding(img.path)
+            # vec = embedding.detach().cpu().numpy().astype("float32")
+            vec = self.colorvec.gen_color_vec(img.path)
+            faiss.normalize_L2(vec)
+            self.idx.add_with_ids(vec, img.id)
+        except Exception as e:
+            print("ERROR", e)
             with Session(self.engine) as session:
                 session.delete(img)
                 session.commit()
+                self.idx.remove_ids(np.array([img.id]))
             
 
 if __name__ == "__main__":
     db = ImgDBMaker("test.db", DATA_LOCATION)
     db.populate_db()
-    # fi = faiss.read_index('Index_db.faiss')
-    # print(fi.is_trained)
-    # embeddings = faiss.vector_to_array(fi.id_map)  # This is a numpy array (float32)
-    # print(embeddings.shape)  # (num_vectors, vector_dim)
-    # for i in range(1, 3742):
-    #     if i != embeddings[i-1]:
-    #         print(i, embeddings[i-1])
-    #         break
-    # print(embeddings[:-1])

@@ -4,7 +4,6 @@ import cv2 as cv
 import torch
 from autoencoder.autoenc import AutoEncoder
 from torchvision.models.feature_extraction import create_feature_extractor
-import matplotlib.pyplot as plt
 import os
 
 class ImageRecomender:
@@ -75,9 +74,3 @@ if __name__ == '__main__':
     ir.img_to_compare = Path('images/IMG_3627.jpeg')
     ir.read_img_to_compare()
     ir.gen_embedding()
-
-    
-    fig, (ax1, ax2) = plt.subplots(1,2, figsize = (12,8))
-    ax1.imshow(ir._img_to_compare_grey_struct.view(ir._struct_ds_size[0], ir._struct_ds_size[1]).cpu(), cmap = 'grey')
-    ax2.imshow(ir._img_to_compare_struct_vec, cmap = 'grey')
-    plt.show()

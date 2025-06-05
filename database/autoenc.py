@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.utils.data as Data
 import torchvision
-from torchsummary import summary
+#from torchsummary import summary
 import numpy as np
 import pickle
 from pathlib import Path
@@ -90,7 +90,7 @@ def run_ae(index: int, logging_interval = 100):
 
     ae = AutoEncoder()
     ae.to(device)
-    summary(model=ae, input_size=(1,32*32))
+    #summary(model=ae, input_size=(1,32*32))
     optimizer = torch.optim.Adam(ae.parameters(), lr=LR)
     loss_function = nn.MSELoss()
     for epoch in range(EPOCH):
