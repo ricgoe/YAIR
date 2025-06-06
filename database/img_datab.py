@@ -52,6 +52,7 @@ class ImgDBMaker:
         except Exception as e:
             print("ERROR", e)
             with Session(self.engine) as session:
+                session.refresh(img)
                 session.delete(img)
                 session.commit()
                 self.idx.remove_ids(np.array([img.id]))
