@@ -15,8 +15,8 @@ class Embedder:
         self._return_nodes: dict = {"encoder.4": "encoding_layer", "decoder.5": "decoding_layer"}
         self._feature_extract = create_feature_extractor(self._model, return_nodes=self._return_nodes)
        
-    def process(self, img_path) -> torch.Tensor:
-        img = cv.imread(str(img),cv.IMREAD_GRAYSCALE)
+    def process(self, img_path: Path) -> torch.Tensor:
+        img = cv.imread(str(img_path),cv.IMREAD_GRAYSCALE)
         if img is None:
             raise UnidentifiedImageError
         img = np.float32(img)/255

@@ -14,18 +14,18 @@ index : IndexFlatIP = fi.index
 print(fi.ntotal)
 # print(fi.is_trained)
 ids = faiss.vector_to_array(fi.id_map)  # This is a numpy array (float32)
-pos = int(np.where(ids == 101)[0][0])
+pos = int(np.where(ids == 98)[0][0])
 print(pos)
 vec: np.ndarray = index.reconstruct(pos, None).reshape(1, -1)
 faiss.normalize_L2(vec)
-D, I = fi.search(vec, 450)
+D, I = fi.search(vec, 5)
 print(D.min(), D.max())
 print(I)
 with Session(engine) as session:
-    for i in I[0][::-1][:5]:
+    for i in I[0]:
         img = session.get(ImgEntry, int(i))
         print(img.path)
-    print(session.get(ImgEntry, 101).path)
+    print(session.get(ImgEntry, 98).path)
 # print(embeddings)  # (num_vectors, vector_dim)
 # print(i,"\n\n\n\n")
 # print(vec)
