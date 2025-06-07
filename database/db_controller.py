@@ -11,6 +11,7 @@ import numpy as np
 from queue import Queue
 import threading
 from sqlalchemy.exc import IntegrityError
+from sqlmodel import select
 from threadables import Enqueuer, Worker, worker
 
 class DBController:
@@ -34,7 +35,7 @@ class DBController:
             self.tqdm = tqdm(total=estimated_load)
 
     def populate_db(self, n=None):
-        Enqueuer(self.files_to_process, self.img_drive_path.rglob("*"), lambda p: p.is_file(), self.threads, n, self.kill_switch).start()
+        Enqueuer(self.files_to_process, self.img_drive_path.rglob("*"), self.filter_image_duplicates, self.threads, n, self.kill_switch).start()
         for _ in range(self.threads):
             Worker(self.files_to_process, self.process_file, self.on_worker_done, self.kill_switch).start() # calculate vector and write to output queue
         try:
@@ -44,6 +45,13 @@ class DBController:
         except KeyboardInterrupt:
             self.kill_switch.set()
         faiss.write_index(self.idx, str(self.index_path))
+        
+    def filter_image_duplicates(self, img_path: Path):
+        if not img_path.is_file(): return False
+        with Session(self.engine) as session:
+            exists = session.exec(select(ImgEntry).where(ImgEntry.path == str(img_path))).first()
+            if exists: return False
+        return True
     
     def write_to_db(self, result: tuple[Path, np.ndarray]):
         img_path, height, width, vec = result
