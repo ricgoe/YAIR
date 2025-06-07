@@ -1,20 +1,17 @@
 from pathlib import Path
 from sqlmodel import SQLModel, create_engine, Session
-from database import ImgEntry
+from database.image_model import ImgEntry
+from database.colorvec import ColorVecCalculator
 # from embeddings import Embedder
 # from autoenc import AutoEncoder
-from colorvec import ColorVecCalculator
 from faiss import IndexFlatIP, IndexFlatL2, IndexIDMap
 import faiss
 from tqdm import tqdm
 import numpy as np
 from queue import Queue
-from collections.abc import Callable
-from typing import Iterator
 import threading
 from sqlalchemy.exc import IntegrityError
-from colorama import just_fix_windows_console, Style, Fore
-from threadables import Enqueuer, Worker
+from threadables import Enqueuer, Worker, worker
 
 class DBController:
     def __init__(self, db_path: str, index_path: Path, img_drive_path: Path, threads = 4,  estimated_load = None):
@@ -42,8 +39,7 @@ class DBController:
             Worker(self.files_to_process, self.process_file, self.on_worker_done, self.kill_switch).start() # calculate vector and write to output queue
         try:
             if self.tqdm and n: self.tqdm.total = n
-            self.worker(self.vectors_to_index, self.write_to_db) # currently running on main thread. call line below for diffrent thread (?necessary?)
-            #threading.Thread(target=self.worker, args=(self.vectors_to_index, self.write_to_db)).start()
+            worker(self.vectors_to_index, self.write_to_db, self.on_worker_done, self.kill_switch) # work non-wrapped to execue in main thread
         except KeyboardInterrupt:
             self.kill_switch.set()
         if self.tqdm: self.tqdm.close()

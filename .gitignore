@@ -1,6 +1,6 @@
 .venv
 images
-.faafo
+.faafo*
 matrices
 prasi
 .DS_Store
