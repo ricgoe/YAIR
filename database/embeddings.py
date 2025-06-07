@@ -5,7 +5,7 @@ from PIL import UnidentifiedImageError
 import torch
 from torchvision.models.feature_extraction import create_feature_extractor
 import os
-from autoenc import AutoEncoder
+from autoencoder import AutoEncoder
 
 
 class Embedder:

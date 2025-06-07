@@ -1,20 +1,24 @@
 from pathlib import Path
 from sqlmodel import SQLModel, create_engine, Session
-from ImgModel import ImgEntry
+from database import ImgEntry
 # from embeddings import Embedder
 # from autoenc import AutoEncoder
-from colorvec1 import ColorVecCalculator
+from colorvec import ColorVecCalculator
 from faiss import IndexFlatIP, IndexFlatL2, IndexIDMap
 import faiss
 from tqdm import tqdm
 import numpy as np
 from queue import Queue
 from collections.abc import Callable
+from typing import Iterator
 import threading
 from sqlalchemy.exc import IntegrityError
+from colorama import just_fix_windows_console, Style, Fore
+from threadables import Enqueuer, Worker
 
-class ImgDBMaker:
-    def __init__(self, db_path: str, index_path: Path, img_drive_path: Path, threads = 4, cap = None):
+class DBController:
+    def __init__(self, db_path: str, index_path: Path, img_drive_path: Path, threads = 4,  estimated_load = None):
+        # just_fix_windows_console() # colorama fix, does nothing on unix
         self.engine = create_engine(f"sqlite:///{db_path}")
         SQLModel.metadata.create_all(self.engine)
         self.idx = faiss.read_index(str(index_path)) if index_path.is_file() else IndexIDMap(IndexFlatIP(26))
@@ -28,17 +32,21 @@ class ImgDBMaker:
         self.index_path = index_path
         self.threads = threads
         self.kill_switch = threading.Event()
-        self.cap = cap
+        self.tqdm = None
+        if estimated_load:
+            self.tqdm = tqdm(total=estimated_load)
 
     def populate_db(self, n=None):
-        threading.Thread(target=self.enqueuer, args=(self.cap,)).start() # file_queue
+        Enqueuer(self.files_to_process, self.img_drive_path.rglob("*"), lambda p: p.is_file(), self.threads, n, self.kill_switch).start()
         for _ in range(self.threads):
-            threading.Thread(target=self.worker, args=(self.files_to_process, self.process_file, self.on_worker_done)).start() # calculate vector and write to output queue
+            Worker(self.files_to_process, self.process_file, self.on_worker_done, self.kill_switch).start() # calculate vector and write to output queue
         try:
+            if self.tqdm and n: self.tqdm.total = n
             self.worker(self.vectors_to_index, self.write_to_db) # currently running on main thread. call line below for diffrent thread (?necessary?)
             #threading.Thread(target=self.worker, args=(self.vectors_to_index, self.write_to_db)).start()
         except KeyboardInterrupt:
             self.kill_switch.set()
+        if self.tqdm: self.tqdm.close()
         faiss.write_index(self.idx, str(self.index_path))
         
     def write_to_db(self, result: tuple[Path, np.ndarray]):
@@ -61,6 +69,7 @@ class ImgDBMaker:
             finally:
                 session.commit()
         self.images_done += 1
+        if self.tqdm: self.tqdm.update(1)
         if self.images_done % 500 == 0: faiss.write_index(self.idx, str(self.index_path))
                 
     def process_file(self, img_path: Path):
@@ -72,41 +81,11 @@ class ImgDBMaker:
         self.worker_done += 1
         if self.worker_done >= self.threads:
             self.vectors_to_index.put(None)
-        
-    def enqueuer(self, n=None):
-        i = 0
-        for file in self.img_drive_path.rglob("*"):
-            if file.is_dir():
-                continue
-            self.files_to_process.put(file)
-            i += 1
-            if n is not None and i >= n:
-                break
-            if self.kill_switch.is_set():
-                print("Enqueuer killed")
-                return
-        for _ in range(self.threads):
-            self.files_to_process.put(None)  # Sentinels to stop workers
-        print("Enqueuer exited gracefully")
-    
-    def worker(self, queue: Queue, func: Callable, exit_func: Callable=None):
-        while True:
-            result = queue.get()
-            if result is None:
-                if exit_func is not None: exit_func()
-                break
-            if self.kill_switch.is_set():
-                print("Worker killed")
-                return
-            func(result)
-            queue.task_done()
-        print("Worker exited gracefully")
-
  
 if __name__ == "__main__":
-    import time
+    # import time
     # db = ImgDBMaker(Path("test.db"), Path('Index_db.faiss'), Path("/Volumes/Big Data/data/image_data"))
-    db = ImgDBMaker(Path("test.db"), Path('Index_db.faiss'), Path("images"), threads=4, cap=100)
-    start = time.time()
+    db = DBController(Path("test.db"), Path('Index_db.faiss'), Path("images"), threads=4, estimated_load=540_000)
+    # start = time.time()
     db.populate_db(n=100)
-    print(time.time()-start)
+    # print(time.time()-start)
