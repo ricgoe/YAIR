@@ -1,6 +1,6 @@
 from pathlib import Path
 from sqlmodel import SQLModel, create_engine, Session
-from database.image_model import ImgEntry
+from database.image_model import ImgEntry, ImgConvertFailure
 from database.colorvec import ColorVecCalculator
 # from embeddings import Embedder
 # from autoenc import AutoEncoder
@@ -69,9 +69,12 @@ class DBController:
         if self.images_done % 500 == 0: faiss.write_index(self.idx, str(self.index_path))
                 
     def process_file(self, img_path: Path):
-        vec, height, width = self.colorvec.gen_color_vec(img_path)
-        # TODO concatinate with embeddings and weight properly
-        self.vectors_to_index.put((img_path, height, width, vec))
+        try:
+            vec, height, width = self.colorvec.gen_color_vec(img_path)
+            # TODO concatinate with embeddings and weight properly
+            self.vectors_to_index.put((img_path, height, width, vec))
+        except ImgConvertFailure as e:
+            print(e)
         
     def on_worker_done(self):
         self.worker_done += 1
