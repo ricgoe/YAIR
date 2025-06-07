@@ -11,7 +11,7 @@ import numpy as np
 from queue import Queue
 import threading
 from sqlalchemy.exc import IntegrityError
-from sqlmodel import select
+from sqlmodel import select, func
 from threadables import Enqueuer, Worker, worker
 
 class DBController:
@@ -32,6 +32,8 @@ class DBController:
         self.kill_switch = threading.Event()
         self.tqdm = None
         if estimated_load:
+            with Session(self.engine) as session:
+                estimated_load -=session.exec(select(func.count(ImgEntry.id))).one()
             self.tqdm = tqdm(total=estimated_load)
 
     def populate_db(self, n=None):
