@@ -1,7 +1,7 @@
 import numpy as np
 import faiss
 from faiss import IndexFlatIP, IndexFlatL2, IndexIDMap
-from database import ImgEntry
+from database.image_model import ImgEntry
 from sqlmodel import SQLModel, create_engine, Session
 
 engine = create_engine(f"sqlite:///test.db")
