@@ -1,0 +1,3 @@
+[submodule "threadables"]
+	path = threadables
+	url = https://github.com/jaboll-ai/threadables.git
