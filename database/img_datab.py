@@ -38,22 +38,24 @@ class ImgDBMaker:
         faiss.write_index(self.idx, 'Index_db.faiss')
                 
         
-    def write_to_db(self, img: ImgEntry):
-        try:
-            with Session(self.engine) as session:
+    def write_to_db(self, result: tuple[Path, np.ndarray]):
+        img_path, height, width, vec = result
+        img = ImgEntry(path=str(img_path), width=width, height=height)
+        with Session(self.engine) as session:
+            try:
                 session.add(img)
-                session.commit()
+                session.flush()
                 session.refresh(img)
-            # embedding = self.embedder.gen_embedding(img.path)
-            # vec = embedding.detach().cpu().numpy().astype("float32")
-            vec = self.colorvec.gen_color_vec(img.path)
-            faiss.normalize_L2(vec)
-            self.idx.add_with_ids(vec, img.id)
-        except Exception as e:
-            print("ERROR", e)
-            with Session(self.engine) as session:
-                session.refresh(img)
-                session.delete(img)
+    
+                faiss.normalize_L2(vec)
+                self.idx.add_with_ids(vec, img.id)
+            except Exception as e:
+                if isinstance(e, IntegrityError): print(f"{img_path} already exists in database")
+                else: print("ERROR", e)
+                session.rollback()
+                if img.id:
+                    self.idx.remove_ids(np.array([img.id]))
+            finally:
                 session.commit()
                 self.idx.remove_ids(np.array([img.id]))
             
