@@ -3,6 +3,8 @@ from PySide6.QtWidgets import QApplication, QLabel, QWidget, QVBoxLayout, QHBoxL
 from PySide6.QtGui import QPixmap
 from PySide6.QtCore import Qt, QUrl
 from math import ceil, floor
+from database import DBController
+from pathlib import Path
 
 GRID_SIZE = 3
 
@@ -41,6 +43,8 @@ class ImageDropWidget(QWidget):
         self.slider2 = self.make_slider("Slider2", 0, 100)
         self.slider3 = self.make_slider("Slider3", 0, 100)
         
+        self.db = DBController(Path("test.db"), Path('Index_db.faiss'), Path("images"), threads=6, estimated_load=540_000)
+        
 
     def dragEnterEvent(self, event):
         if event.mimeData().hasUrls():
@@ -54,7 +58,7 @@ class ImageDropWidget(QWidget):
                 pixmap = QPixmap(path)
                 self.label.setPixmap(pixmap.scaled(
                     self.label.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation))
-                self.populate_closest([path]*40)
+                self.populate_closest(self.db.get_closes_from_db(Path(path), 9))
                 break
             
     def make_slider(self, name, minV, maxV):
