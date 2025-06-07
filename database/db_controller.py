@@ -11,7 +11,7 @@ import numpy as np
 from queue import Queue
 import threading
 from sqlalchemy.exc import IntegrityError
-from threadables import Enqueuer, Worker, worker
+from threadables import Enqueuer, Worker, Counter, worker
 
 class DBController:
     def __init__(self, db_path: str, index_path: Path, img_drive_path: Path, threads = 4,  estimated_load = None):
@@ -38,13 +38,13 @@ class DBController:
         for _ in range(self.threads):
             Worker(self.files_to_process, self.process_file, self.on_worker_done, self.kill_switch).start() # calculate vector and write to output queue
         try:
-            if self.tqdm and n: self.tqdm.total = n
-            worker(self.vectors_to_index, self.write_to_db, self.on_worker_done, self.kill_switch) # work non-wrapped to execue in main thread
+            if self.tqdm and n: 
+                self.tqdm.total = n
+            worker(self.vectors_to_index, self.write_to_db, self.on_worker_done, self.kill_switch) # work non-wrapped to execute in main thread
         except KeyboardInterrupt:
             self.kill_switch.set()
-        if self.tqdm: self.tqdm.close()
         faiss.write_index(self.idx, str(self.index_path))
-        
+    
     def write_to_db(self, result: tuple[Path, np.ndarray]):
         img_path, height, width, vec = result
         img = ImgEntry(path=str(img_path), width=width, height=height)
