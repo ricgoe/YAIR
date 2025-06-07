@@ -11,7 +11,7 @@ import numpy as np
 from queue import Queue
 import threading
 from sqlalchemy.exc import IntegrityError
-from threadables import Enqueuer, Worker, Counter, worker
+from threadables import Enqueuer, Worker, worker
 
 class DBController:
     def __init__(self, db_path: str, index_path: Path, img_drive_path: Path, threads = 4,  estimated_load = None):
