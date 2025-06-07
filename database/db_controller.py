@@ -39,7 +39,7 @@ class DBController:
     def populate_db(self, n=None):
         Enqueuer(self.files_to_process, self.img_drive_path.rglob("*"), self.filter_image_duplicates, self.threads, n, self.kill_switch).start()
         for _ in range(self.threads):
-            Worker(self.files_to_process, self.process_file, self.on_worker_done, self.kill_switch).start() # calculate vector and write to output queue
+            Worker(self.files_to_process, self.enqueue_vec, self.on_worker_done, self.kill_switch).start() # calculate vector and write to output queue
         try:
             if self.tqdm and n: 
                 self.tqdm.total = n
@@ -78,18 +78,31 @@ class DBController:
         if self.tqdm: self.tqdm.update(1)
         if self.images_done % 500 == 0: faiss.write_index(self.idx, str(self.index_path))
                 
-    def process_file(self, img_path: Path):
+    def enqueue_vec(self, img_path: Path) -> None:
         try:
             vec, height, width = self.colorvec.gen_color_vec(img_path)
             # TODO concatinate with embeddings and weight properly
             self.vectors_to_index.put((img_path, height, width, vec))
         except ImgConvertFailure as e:
             print(e)
+            
+    def get_vec(self, img_path: Path):
+        return self.colorvec.gen_color_vec(img_path)
+
+    def get_closes_from_db(self, img_path: Path, k: int) -> list[str]:
+        vec, _, _ = self.get_vec(img_path)
+        faiss.normalize_L2(vec)
+        _, I = self.idx.search(vec, k)
+        with Session(self.engine) as session:
+            return [session.get(ImgEntry, int(i)).path for i in I[0]]
+                
         
+                    
     def on_worker_done(self):
         self.worker_done += 1
         if self.worker_done >= self.threads:
             self.vectors_to_index.put(None)
+    
  
 if __name__ == "__main__":
     # import time
