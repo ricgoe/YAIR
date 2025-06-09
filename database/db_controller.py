@@ -89,12 +89,18 @@ class DBController:
     def get_vec(self, img_path: Path):
         return self.colorvec.gen_color_vec(img_path)
 
-    def get_closes_from_db(self, img_path: Path, k: int) -> list[str]:
+    def get_closest_from_db(self, img_path: Path, k: int) -> list[str]:
         vec, _, _ = self.get_vec(img_path)
         faiss.normalize_L2(vec)
         _, I = self.idx.search(vec, k)
         with Session(self.engine) as session:
-            return [session.get(ImgEntry, int(i)).path for i in I[0]]
+            imgs = []
+            for i in I[0]:
+                img = session.get(ImgEntry, int(i))
+                if img:
+                    imgs.append(img.path)
+        if len(imgs) < k: imgs.append(None)
+        return imgs
                 
         
                     
