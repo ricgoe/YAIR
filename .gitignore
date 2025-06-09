@@ -8,3 +8,5 @@ ds_*
 __pycache__
 res
 archive
+test.db
+Index*
