@@ -1,12 +1,45 @@
 import sys
 from PySide6.QtWidgets import QApplication, QLabel, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QScrollArea, QSlider
-from PySide6.QtGui import QPixmap
-from PySide6.QtCore import Qt, QUrl
+from PySide6.QtGui import QPixmap, QDragEnterEvent, QDropEvent
+from PySide6.QtCore import Qt, QRunnable, QThreadPool, Signal, QObject
 from math import ceil, floor
 from database import DBController
 from pathlib import Path
 
 GRID_SIZE = 3
+PRE_FETCH = 20
+
+class Container(QObject):
+    finished = Signal(object)
+class DBWorker(QRunnable):
+    def __init__(self, db: DBController, search_img, total):
+        super().__init__()
+        self.signals = Container()
+        self.db = db
+        self.search_img = search_img
+        self.total = total
+
+    def run(self):
+        result = self.db.get_closest_from_db(Path(self.search_img), self.total)
+        self.signals.finished.emit(result)
+        
+class ScalerWorker(QRunnable):
+    def __init__(self, paths, size):
+        super().__init__()
+        self.signals = Container()
+        self.paths = paths
+        self.size = size
+
+    def run(self):
+        results = [ # of form [(path, pixmap), ...]
+            QPixmap(path).scaled(
+                self.size,
+                Qt.KeepAspectRatio,
+                Qt.SmoothTransformation
+            ) if path else None
+            for path in self.paths
+        ]
+        self.signals.finished.emit(results)
 
 class ImageDropWidget(QWidget):
     def __init__(self):
@@ -22,6 +55,8 @@ class ImageDropWidget(QWidget):
         self.control_layout = QVBoxLayout(self.control)
 
         self.scroll_area = QScrollArea()
+        self.scroll_bar = self.scroll_area.verticalScrollBar()
+        self.scroll_bar.valueChanged.connect(self.scrolled)
         self.scroll_area.setWidgetResizable(True)
         self.images = QWidget()
         self.images_layout = QGridLayout(self.images)
@@ -44,13 +79,72 @@ class ImageDropWidget(QWidget):
         self.slider3 = self.make_slider("Slider3", 0, 100)
         
         self.db = DBController(Path("test.db"), Path('Index_db.faiss'), Path("images"), threads=6, estimated_load=540_000)
+        self.search_img = None
         
+        # Multithreading
+        self.caching = 1
+        self.cached_closest:list[str] = []
+        self.cached_pixmaps:list[QPixmap] = []
+        self.thread_pool = QThreadPool.globalInstance()
+        
+    def cache_closest(self):
+        worker = DBWorker(self.db, self.search_img, self.caching * PRE_FETCH)
+        self.caching += 1
+        worker.signals.finished.connect(self.paths_to_cache)
+        self.thread_pool.start(worker)
+    
+    def paths_to_cache(self, result):
+        self.cached_closest = result
+    
+    def cache_pixmap(self):
+        start = GRID_SIZE**2 * (self.paginate+1) + GRID_SIZE
+        end = start + GRID_SIZE**2
+        worker = ScalerWorker(self.fetch_or_cached_paths(start, end), self.images.size() / (GRID_SIZE+0.5))
+        worker.signals.finished.connect(self.pixmap_to_cache)
+        self.thread_pool.start(worker)
+    
+    def pixmap_to_cache(self, result):
+        self.cached_pixmaps = result
+        
+    def fetch_or_cached_paths(self, start, end):
+        if len(self.cached_closest) > end: 
+            return [self.cached_closest[i] for i in range(start, end)]
+        else:
+            paths = self.db.get_closest_from_db(Path(self.search_img), end)
+        if end * GRID_SIZE**2 > len(self.cached_closest) and not None in self.cached_closest: self.cache_closest()
+        return paths[start:end]
+    
+    def get_or_cached_pixmaps(self):
+        start = GRID_SIZE**2 * self.paginate
+        end = start + GRID_SIZE**2
+        if self.paginate == 0: 
+            end += GRID_SIZE
+        else:
+            start += GRID_SIZE
+            end += GRID_SIZE
+        n_maps = end - start
+        if len(self.cached_pixmaps) >= n_maps:
+            cache = [self.cached_pixmaps.pop(0) for _ in range(n_maps)]
+            self.cache_pixmap()
+            return cache
+        else:
+            pixmaps = [
+                QPixmap(path).scaled(
+                    self.images.size() / (GRID_SIZE+0.5),
+                    Qt.KeepAspectRatio,
+                    Qt.SmoothTransformation
+                )
+                if path else None
+                for path in self.fetch_or_cached_paths(start, end)
+            ]
+        self.cache_pixmap()
+        return pixmaps
 
-    def dragEnterEvent(self, event):
+    def dragEnterEvent(self, event: QDragEnterEvent):
         if event.mimeData().hasUrls():
             event.acceptProposedAction()
 
-    def dropEvent(self, event):
+    def dropEvent(self, event: QDropEvent):
         for url in event.mimeData().urls():
             path = url.toLocalFile()
             
@@ -58,8 +152,15 @@ class ImageDropWidget(QWidget):
                 pixmap = QPixmap(path)
                 self.label.setPixmap(pixmap.scaled(
                     self.label.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation))
-                self.populate_closest(self.db.get_closes_from_db(Path(path), 9))
+                self.search_img = path
+                self.paginate = 0
+                self.populate_closest()
                 break
+    
+    def scrolled(self, value):
+        if value == self.scroll_bar.maximum():
+            self.paginate += 1
+            self.populate_closest()
             
     def make_slider(self, name, minV, maxV):
         s = QWidget()
@@ -77,23 +178,18 @@ class ImageDropWidget(QWidget):
         self.control_panel_layout.addWidget(s)
         return s
         
-    def populate_closest(self, paths: list[str]):
+    def populate_closest(self):
         idx = 0 
-        size = self.images.size() / (GRID_SIZE+0.5)
-        for row in range(ceil(len(paths) / GRID_SIZE)):
-            for col in range(3):
-                if idx >= len(paths): break
+        pixmaps = self.get_or_cached_pixmaps()
+        for row in range(ceil(len(pixmaps) / GRID_SIZE)):
+            for col in range(GRID_SIZE):
+                if idx >= len(pixmaps) or pixmaps[idx] is None: 
+                    break
                 label = QLabel()
                 label.setAlignment(Qt.AlignCenter)
                 label.setStyleSheet("border: 1px solid #ccc; background-color: white;")
-                pixmap = QPixmap(paths[idx])
-                scaled_pixmap = pixmap.scaled(
-                    size,
-                    Qt.KeepAspectRatio,
-                    Qt.SmoothTransformation
-                )
-                label.setPixmap(scaled_pixmap)
-                self.images_layout.addWidget(label, row, col)
+                label.setPixmap(pixmaps[idx])
+                self.images_layout.addWidget(label, row+GRID_SIZE*self.paginate, col)
                 idx += 1
 
 
