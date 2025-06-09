@@ -7,7 +7,7 @@ from database import DBController
 from pathlib import Path
 
 GRID_SIZE = 3
-PRE_FETCH = 20
+PRE_FETCH = 100
 
 class Container(QObject):
     finished = Signal(object)
@@ -158,7 +158,7 @@ class ImageDropWidget(QWidget):
                 break
     
     def scrolled(self, value):
-        if value == self.scroll_bar.maximum():
+        if value >= self.scroll_bar.maximum()*0.95:
             self.paginate += 1
             self.populate_closest()
             
