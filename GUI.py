@@ -187,7 +187,7 @@ class ImageDropWidget(QWidget):
                     break
                 label = QLabel()
                 label.setAlignment(Qt.AlignCenter)
-                label.setStyleSheet("border: 1px solid #ccc; background-color: white;")
+                label.setStyleSheet("border: 1px solid #ccc;")
                 label.setPixmap(pixmaps[idx])
                 self.images_layout.addWidget(label, row+GRID_SIZE*self.paginate, col)
                 idx += 1
