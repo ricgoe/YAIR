@@ -1,9 +1,7 @@
 from pathlib import Path
 from sqlmodel import SQLModel, create_engine, Session
 from database.image_model import ImgEntry, ImgConvertFailure
-from features import ColorVecCalculator, OrbVecCalculator, BYOLVecCalculator, SiftVecCalculator, DINOVecCalculator
-# from embeddings import Embedder
-# from autoenc import AutoEncoder
+from features import ColorVecCalculator, OrbVecCalculator, SiftVecCalculator, DINOVecCalculator
 from faiss import IndexFlatIP, IndexIDMap
 import faiss
 from tqdm import tqdm
@@ -19,13 +17,13 @@ from database import ImgConvertFailure
 from PIL import Image
 
 class DBController:
-    def __init__(self, db_path: str, index_path: Path, kmeans_path: Path, byol_path: Path, img_drive_path: Path, threads = 4,  estimated_load = None, orb_length=500, color_length=26, byol_length=256, cap: int = 1000):
+    def __init__(self, db_path: str, index_path: Path, kmeans_path: Path, img_drive_path: Path, threads = 4,  estimated_load = None, feat_length=500, color_length=26, dino_length=384, cap: int = 1000):
         # just_fix_windows_console() # colorama fix, does nothing on unix
         self.engine = create_engine(f"sqlite:///{db_path}")
         SQLModel.metadata.create_all(self.engine)
-        self.idx = faiss.read_index(str(index_path)) if index_path.is_file() else IndexIDMap(IndexFlatIP(orb_length+color_length+byol_length))
+        self.idx = faiss.read_index(str(index_path)) if index_path.is_file() else IndexIDMap(IndexFlatIP(feat_length+color_length+dino_length))
         # self.embedder = Embedder(model_path="/Users/richardgox/Documents/4. Semester/GuglLens/database/autoencoder_full_131_best.pth")
-        self.vector_length = orb_length
+        self.vector_length = feat_length
         self.files_to_process = Queue(maxsize=threads+1)
         self.vectors_to_index = Queue()
         self.index_path = index_path
@@ -42,9 +40,9 @@ class DBController:
         self.colorvec = ColorVecCalculator(color_length)
         self.kmeans_path = kmeans_path
         self.kmeans = faiss.read_index(str(kmeans_path)) if kmeans_path.is_file() else print("No kmeans trained")
-        self.orbvec = OrbVecCalculator(self.kmeans, self.vector_length)
-        self.byol_length = byol_length
-        self.byolvec = BYOLVecCalculator(byol_path)
+        self.siftvec = SiftVecCalculator(self.kmeans, self.vector_length)
+        self.dino_length = dino_length
+        self.dinovec = DINOVecCalculator()
         self.cap = cap
 
     def populate_db(self, n=None):
@@ -76,7 +74,6 @@ class DBController:
                 session.flush()
                 session.refresh(img)
 
-                faiss.normalize_L2(vec)
                 self.idx.add_with_ids(vec, img.id)
             except Exception as e:
                 if isinstance(e, IntegrityError): print(f"{img_path} already exists in database")
@@ -97,33 +94,44 @@ class DBController:
         except Exception as e:
             print(f"Failed to process {str(img_path)}: {e}", file=sys.stderr)
             
-    def get_vec(self, img_path: str):
+    def get_vec(self, img_path: Path):
         img = Image.open(img_path).convert('RGB')
         arr = np.array(img)
         scale = self.cap / max(arr.shape)
         if scale < 1:
             arr = cv.resize(arr, None, fx=scale, fy=scale, interpolation=cv.INTER_AREA)
-        #cvec = self.colorvec.gen_color_vec(arr)
         arr_g = cv.cvtColor(arr, cv.COLOR_RGB2GRAY)
-        ovec = self.orbvec.gen_orb_vec(arr_g)
-        # bvec = self.byolvec.gen_byol_vec(arr_g)
-        # if bvec.shape[1] != self.byol_length: 
-        #     raise ValueError(f"Mismatch between expected length '{self.byol_length}' and actual length '{bvec.shape[1]}'")
-        #return np.concatenate((cvec, bvec), axis=1), img.height, img.width 
-        return ovec, img.height, img.width 
+        # if dvec.shape[1] != self.dino_length: 
+        #     raise ValueError(f"Mismatch between expected length '{self.dino_length}' and actual length '{dvec.shape[1]}'")
+        ratios=[
+                (self.dinovec.gen_dino_vec(arr), 16), 
+                (self.colorvec.gen_color_vec(arr), 11),
+                (self.siftvec.gen_sift_vec(arr_g), 4),
+                ] 
+        for v, _ in ratios: faiss.normalize_L2(v)
+        total = sum([i for _, i in ratios])
+        weighted = [np.sqrt(i / total) * vector for vector, i in ratios]
+        vec = np.concatenate(weighted, axis=1)
+        faiss.normalize_L2(vec)
+        return vec, img.height, img.width 
 
-    def get_closest_from_db(self, img_path: Path, k: int) -> list[str]:
+    def get_closest_from_db(self, img_path: Path, k: int, img_path2: Path = None, mix: float = None) -> list[str]:
         vec, _, _ = self.get_vec(img_path)
         faiss.normalize_L2(vec)
-        _, I = self.idx.search(vec, k)
+        if img_path2 and mix is not None:
+            vec2, _, _ = self.get_vec(img_path2)
+            faiss.normalize_L2(vec2)
+            vec = vec * mix + vec2 * (1-mix)
+            faiss.normalize_L2(vec)
+        _, I = self.idx.search(vec, k+1)
         with Session(self.engine) as session:
             imgs = []
             for i in I[0]:
                 img = session.get(ImgEntry, int(i))
                 if img:
                     imgs.append(img.path)
-        if len(imgs) < k: imgs.append(None)
-        return imgs
+        if len(imgs) < k+1: imgs.append(None)
+        return imgs[1:]
                 
     def build_feat_kmeans(self, n=None, mode="orb"):
         Enqueuer(self.files_to_process, self.img_drive_path.rglob("*"), self.filter_image_duplicates, self.threads, n, self.kill_switch).start()
