@@ -1,7 +1,7 @@
 from pathlib import Path
 from sqlmodel import SQLModel, create_engine, Session
 from database.image_model import ImgEntry, ImgConvertFailure
-from features import ColorVecCalculator, OrbVecCalculator, BYOLVecCalculator
+from features import ColorVecCalculator, OrbVecCalculator, BYOLVecCalculator, SiftVecCalculator, DINOVecCalculator
 # from embeddings import Embedder
 # from autoenc import AutoEncoder
 from faiss import IndexFlatIP, IndexIDMap
@@ -103,13 +103,14 @@ class DBController:
         scale = self.cap / max(arr.shape)
         if scale < 1:
             arr = cv.resize(arr, None, fx=scale, fy=scale, interpolation=cv.INTER_AREA)
-        cvec = self.colorvec.gen_color_vec(arr)
+        #cvec = self.colorvec.gen_color_vec(arr)
         arr_g = cv.cvtColor(arr, cv.COLOR_RGB2GRAY)
         ovec = self.orbvec.gen_orb_vec(arr_g)
-        bvec = self.byolvec.gen_byol_vec(arr_g)
-        if bvec.shape[1] != self.byol_length: 
-            raise ValueError(f"Mismatch between expected length '{self.byol_length}' and actual length '{bvec.shape[1]}'")
-        return np.concatenate((cvec, ovec, bvec), axis=1), img.height, img.width 
+        # bvec = self.byolvec.gen_byol_vec(arr_g)
+        # if bvec.shape[1] != self.byol_length: 
+        #     raise ValueError(f"Mismatch between expected length '{self.byol_length}' and actual length '{bvec.shape[1]}'")
+        #return np.concatenate((cvec, bvec), axis=1), img.height, img.width 
+        return ovec, img.height, img.width 
 
     def get_closest_from_db(self, img_path: Path, k: int) -> list[str]:
         vec, _, _ = self.get_vec(img_path)
@@ -124,21 +125,21 @@ class DBController:
         if len(imgs) < k: imgs.append(None)
         return imgs
                 
-    def build_orb_kmeans(self, n=None):
+    def build_feat_kmeans(self, n=None, mode="orb"):
         Enqueuer(self.files_to_process, self.img_drive_path.rglob("*"), self.filter_image_duplicates, self.threads, n, self.kill_switch).start()
         for _ in range(self.threads):
-            Worker(self.files_to_process, self.enqueue_orb, self.on_worker_done, self.kill_switch).start()
+            Worker(self.files_to_process, lambda path: self.enqueue_feat_vec(path, mode), self.on_worker_done, self.kill_switch).start()
         orbis = []
-        def append_orb(vec):
+        def append_feat_vec(vec):
             if (i:=len(orbis)) % 10 == 0:
                 print(i, "done")
             orbis.append(vec)
         try:
-            worker(self.vectors_to_index, append_orb, lambda: print("main_done"), self.kill_switch)
+            worker(self.vectors_to_index, append_feat_vec, lambda: print("main_done"), self.kill_switch)
             print(f"list done with {len(orbis)} elements")
             arr = np.vstack(orbis)
             print("vstack done", arr.shape)
-            np.save("orbis-128threads.npy", arr)
+            np.save("feats-128threads.npy", arr)
             km = faiss.Kmeans(arr.shape[1], self.vector_length, niter=25, verbose = True, gpu=True, max_points_per_centroid=600000)
             km.train(arr)
             _, d = km.centroids.shape
@@ -152,11 +153,19 @@ class DBController:
         print("finished-building orb")
         return index
     
-    
-    
-    def enqueue_orb(self, path:Path):
+    def enqueue_feat_vec(self, path:Path, mode="orb"):
         try:
-            vec, _, _ = OrbVecCalculator.gen_internal_embedding(str(path), self.vector_length)
+            if mode == "orb":
+                calculator = OrbVecCalculator
+            elif mode == "sift":
+                calculator = SiftVecCalculator
+            else: raise ValueError("mode must be 'orb' or 'sift'")
+            img = Image.open(path).convert('RGB')
+            arr = np.array(img)
+            scale = self.cap / max(arr.shape)
+            if scale < 1:
+                arr = cv.resize(arr, None, fx=scale, fy=scale, interpolation=cv.INTER_AREA)
+            vec, _, _ = calculator.gen_internal_embedding(arr, self.vector_length)
             if vec is None: return
             self.vectors_to_index.put(vec)
         except ImgConvertFailure as e:

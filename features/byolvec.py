@@ -11,12 +11,14 @@ from training import Resnet50SmallDim
 class BYOLVecCalculator:
     
     def __init__(self, model_path: Path):
-        self.dev = 'cuda' if torch.cuda.is_available() else 'cpu'
+        # self.dev = 'cuda' if torch.cuda.is_available() else 'cpu'
+        self.dev = 'mps' if torch.backends.mps.is_available() else 'cpu'
         print(f'Inference running on {self.dev}')
         self.model = Resnet50SmallDim(output_dim=256)
-        # self.model.fc = torch.nn.Identity()
+        #self.model = models.resnet50(weights = None)
+        #self.model.fc = torch.nn.Identity()
         self.state = torch.load(model_path, map_location="cpu")
-        self.model.load_state_dict(self.state, strict = True)
+        self.model.load_state_dict(self.state, strict = False)
         self.model.to(self.dev).eval()
         self.tfm = transforms.Compose([
             transforms.ToTensor(),

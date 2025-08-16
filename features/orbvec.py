@@ -12,7 +12,7 @@ class OrbVecCalculator:
     def gen_orb_vec(self, img: np.ndarray):
         embedding = OrbVecCalculator.gen_internal_embedding(img, self.vector_length)
         if embedding is None:
-            embedding = np.zeros((500,32))
+            embedding = np.zeros((500,256))
         _, label = self.kmeans.search(embedding, 1)
         label = label.ravel()
         vec = np.bincount(label, minlength=self.vector_length)
@@ -23,7 +23,7 @@ class OrbVecCalculator:
     def gen_internal_embedding(img: np.ndarray, vector_length):
         orb = cv.ORB_create(nfeatures=vector_length)
         _, embedding = orb.detectAndCompute(img, None)
-        return embedding
+        return np.unpackbits(embedding, axis=1)
     
 if __name__ == "__main__":
     import faiss

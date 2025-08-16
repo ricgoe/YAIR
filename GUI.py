@@ -1,4 +1,5 @@
 import sys
+import os
 from PySide6.QtWidgets import QApplication, QLabel, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QScrollArea, QSlider
 from PySide6.QtGui import QPixmap, QDragEnterEvent, QDropEvent
 from PySide6.QtCore import Qt, QRunnable, QThreadPool, Signal, QObject
@@ -24,15 +25,16 @@ class DBWorker(QRunnable):
         self.signals.finished.emit(result)
         
 class ScalerWorker(QRunnable):
-    def __init__(self, paths, size):
+    def __init__(self, paths, size, location=""):
         super().__init__()
         self.signals = Container()
         self.paths = paths
         self.size = size
+        self.location = location
 
     def run(self):
         results = [ # of form [(path, pixmap), ...]
-            QPixmap(path).scaled(
+            QPixmap(Path(self.location, *Path(path).parts).resolve()).scaled(
                 self.size,
                 Qt.KeepAspectRatio,
                 Qt.SmoothTransformation
@@ -42,7 +44,7 @@ class ScalerWorker(QRunnable):
         self.signals.finished.emit(results)
 
 class ImageDropWidget(QWidget):
-    def __init__(self):
+    def __init__(self, db: DBController, location: str):
         super().__init__()
         self.setWindowTitle("Drag and Drop Image Viewer")
         self.setAcceptDrops(True)
@@ -65,7 +67,7 @@ class ImageDropWidget(QWidget):
 
         self.main_layout.addWidget(self.control,4)
         self.main_layout.addWidget(self.scroll_area,6)
-
+        
         self.label = QLabel("Drop an image here")
         self.label.setAlignment(Qt.AlignCenter)
         self.label.setStyleSheet("border: 2px dashed gray; padding: 20px;")
@@ -78,9 +80,9 @@ class ImageDropWidget(QWidget):
         self.slider2 = self.make_slider("Slider2", 0, 100)
         self.slider3 = self.make_slider("Slider3", 0, 100)
         
-        self.db = DBController(Path("test.db"), Path('Index_db.faiss'), Path("images"), threads=6, estimated_load=540_000)
+        self.db = db
         self.search_img = None
-        
+        self.location = location
         # Multithreading
         self.caching = 1
         self.cached_closest:list[str] = []
@@ -99,7 +101,7 @@ class ImageDropWidget(QWidget):
     def cache_pixmap(self):
         start = GRID_SIZE**2 * (self.paginate+1) + GRID_SIZE
         end = start + GRID_SIZE**2
-        worker = ScalerWorker(self.fetch_or_cached_paths(start, end), self.images.size() / (GRID_SIZE+0.5))
+        worker = ScalerWorker(self.fetch_or_cached_paths(start, end), self.images.size() / (GRID_SIZE+0.5), self.location)
         worker.signals.finished.connect(self.pixmap_to_cache)
         self.thread_pool.start(worker)
     
@@ -129,7 +131,7 @@ class ImageDropWidget(QWidget):
             return cache
         else:
             pixmaps = [
-                QPixmap(path).scaled(
+                QPixmap(Path(self.location, *Path(path).parts).resolve()).scaled(
                     self.images.size() / (GRID_SIZE+0.5),
                     Qt.KeepAspectRatio,
                     Qt.SmoothTransformation
@@ -195,6 +197,13 @@ class ImageDropWidget(QWidget):
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
-    widget = ImageDropWidget()
+    db = DBController(Path("test.db"),
+                  Path('Index_db.faiss'),
+                  Path("models/binflat.faiss"),
+                  Path("models/byol_256.pth"),
+                  Path("/Volumes/Big Data/data"),
+                  threads=4, estimated_load=200_000,
+                  orb_length=1024, color_length=0, byol_length=0)
+    widget = ImageDropWidget(db, "/Volumes/Big Data/data")
     widget.show()
     sys.exit(app.exec())
