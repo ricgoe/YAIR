@@ -1,7 +1,7 @@
 import sys
 import os
 from PySide6.QtWidgets import QApplication, QLabel, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QScrollArea, QSlider
-from PySide6.QtGui import QPixmap, QDragEnterEvent, QDropEvent
+from PySide6.QtGui import QPixmap, QDragEnterEvent, QDropEvent, QImageReader
 from PySide6.QtCore import Qt, QRunnable, QThreadPool, Signal, QObject
 from math import ceil, floor
 from database import DBController
@@ -13,15 +13,20 @@ PRE_FETCH = 100
 class Container(QObject):
     finished = Signal(object)
 class DBWorker(QRunnable):
-    def __init__(self, db: DBController, search_img, total):
+    def __init__(self, db: DBController, search_img, total, search_img2=None, value=None):
         super().__init__()
         self.signals = Container()
         self.db = db
         self.search_img = search_img
+        self.search_img2 = search_img2
+        self.value = value
         self.total = total
 
     def run(self):
-        result = self.db.get_closest_from_db(Path(self.search_img), self.total)
+        if self.search_img2:
+            result = self.db.get_closest_from_db(Path(self.search_img), self.total, Path(self.search_img2), self.value / 100)
+        else:
+            result = self.db.get_closest_from_db(Path(self.search_img), self.total)
         self.signals.finished.emit(result)
         
 class ScalerWorker(QRunnable):
@@ -42,12 +47,60 @@ class ScalerWorker(QRunnable):
             for path in self.paths
         ]
         self.signals.finished.emit(results)
+        
+class DropImageLabel(QLabel):
+    imageDropped = Signal(str)
+    def __init__(self, text="Drop an image here", parent=None):
+        super().__init__(text, parent)
+        self.setAcceptDrops(True)
+        self.setAlignment(Qt.AlignCenter)
+        self.setStyleSheet("border: 2px dashed gray; padding: 20px;")
+
+    def dragEnterEvent(self, e):
+        if e.mimeData().hasImage():
+            e.acceptProposedAction()
+            return
+        if e.mimeData().hasUrls():
+            for url in e.mimeData().urls():
+                path = url.toLocalFile()
+                if path:
+                    rdr = QImageReader(path)
+                    if rdr.canRead():
+                        e.acceptProposedAction()
+                        return
+        e.ignore()
+
+    def dropEvent(self, e):
+        pix = None
+        if e.mimeData().hasImage():
+            pix = QPixmap.fromImage(e.mimeData().imageData())
+        elif e.mimeData().hasUrls():
+            for url in e.mimeData().urls():
+                path = url.toLocalFile()
+                if not path:
+                    continue
+                rdr = QImageReader(path)
+                if rdr.canRead():
+                    img = rdr.read()
+                    if not img.isNull():
+                        pix = QPixmap.fromImage(img)
+                        break
+
+        if pix and not pix.isNull():
+            scaled = pix.scaled(self.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            self.setPixmap(scaled)
+            self.setText("")
+            self.imageDropped.emit(path or "")
+            e.acceptProposedAction()
+        else:
+            e.ignore()
+            
+
 
 class ImageDropWidget(QWidget):
     def __init__(self, db: DBController, location: str):
         super().__init__()
         self.setWindowTitle("Drag and Drop Image Viewer")
-        self.setAcceptDrops(True)
         self.showMaximized()
 
         self.main_layout = QHBoxLayout(self)
@@ -60,28 +113,28 @@ class ImageDropWidget(QWidget):
         self.scroll_bar = self.scroll_area.verticalScrollBar()
         self.scroll_bar.valueChanged.connect(self.scrolled)
         self.scroll_area.setWidgetResizable(True)
-        self.images = QWidget()
-        self.images_layout = QGridLayout(self.images)
-        self.images.setLayout(self.images_layout)
-        self.scroll_area.setWidget(self.images)
-
+        
         self.main_layout.addWidget(self.control,4)
         self.main_layout.addWidget(self.scroll_area,6)
         
-        self.label = QLabel("Drop an image here")
-        self.label.setAlignment(Qt.AlignCenter)
-        self.label.setStyleSheet("border: 2px dashed gray; padding: 20px;")
+        self.label = DropImageLabel("Drop an image here")
+        self.label.setAcceptDrops(True)
+        self.label.imageDropped.connect(lambda path: self.set_search_img(1, path))
+        self.label2 = DropImageLabel("(Optional) Drop an image here")
+        self.label2.setAcceptDrops(True)
+        self.label2.imageDropped.connect(lambda path: self.set_search_img(2, path))
         self.control_panel = QWidget()
         self.control_panel_layout = QVBoxLayout(self.control_panel)
-        self.control_layout.addWidget(self.label, 4)
+        self.control_layout.addWidget(self.label, 2)
+        self.control_layout.addWidget(self.label2, 2)
         self.control_layout.addWidget(self.control_panel,1)
         
-        self.slider1 = self.make_slider("Slider1", 0, 100)
-        self.slider2 = self.make_slider("Slider2", 0, 100)
-        self.slider3 = self.make_slider("Slider3", 0, 100)
+        self.slider1 = self.make_slider("Ratio", 0, 100)
+        self.slider1.sliderReleased.connect(self.reratio_search_img)
         
         self.db = db
         self.search_img = None
+        self.search_img2 = None
         self.location = location
         # Multithreading
         self.caching = 1
@@ -89,8 +142,30 @@ class ImageDropWidget(QWidget):
         self.cached_pixmaps:list[QPixmap] = []
         self.thread_pool = QThreadPool.globalInstance()
         
+    def set_search_img(self, n, path):
+        self.clear_cache()
+        if n == 1:
+            self.search_img = path
+        elif n == 2:
+            self.search_img2 = path
+        self.populate_closest() 
+        
+    def reratio_search_img(self):
+        self.clear_cache()
+        self.populate_closest()
+        
+    def clear_cache(self):
+        self.cached_closest = []
+        self.cached_pixmaps = []
+        self.caching = 1
+        self.images = QWidget()
+        self.images_layout = QGridLayout(self.images)
+        self.images.setLayout(self.images_layout)
+        self.scroll_area.setWidget(self.images)
+        self.paginate = 0
+        
     def cache_closest(self):
-        worker = DBWorker(self.db, self.search_img, self.caching * PRE_FETCH)
+        worker = DBWorker(self.db, self.search_img, self.caching * PRE_FETCH, self.search_img2, self.slider1.value())
         self.caching += 1
         worker.signals.finished.connect(self.paths_to_cache)
         self.thread_pool.start(worker)
@@ -112,7 +187,10 @@ class ImageDropWidget(QWidget):
         if len(self.cached_closest) > end: 
             return [self.cached_closest[i] for i in range(start, end)]
         else:
-            paths = self.db.get_closest_from_db(Path(self.search_img), end)
+            if self.search_img2:
+                paths = self.db.get_closest_from_db(Path(self.search_img), end, Path(self.search_img2), self.slider1.value() / 100)
+            else:
+                paths = self.db.get_closest_from_db(Path(self.search_img), end)
         if end * GRID_SIZE**2 > len(self.cached_closest) and not None in self.cached_closest: self.cache_closest()
         return paths[start:end]
     
@@ -142,22 +220,28 @@ class ImageDropWidget(QWidget):
         self.cache_pixmap()
         return pixmaps
 
-    def dragEnterEvent(self, event: QDragEnterEvent):
-        if event.mimeData().hasUrls():
-            event.acceptProposedAction()
+    
+    # def dragEnterEvent(self, event: QDragEnterEvent):
+    #     if event.mimeData().hasUrls():
+    #         event.acceptProposedAction()
 
-    def dropEvent(self, event: QDropEvent):
-        for url in event.mimeData().urls():
-            path = url.toLocalFile()
+    # def dropEvent(self, event: QDropEvent):
+    #     self.cached_closest = self.cached_pixmaps = []
+    #     self.images = QWidget()
+    #     self.images_layout = QGridLayout(self.images)
+    #     self.images.setLayout(self.images_layout)
+    #     self.scroll_area.setWidget(self.images)
+    #     for url in event.mimeData().urls():
+    #         path = url.toLocalFile()
             
-            if path.lower().endswith((".png", ".jpg", ".jpeg", ".bmp", ".gif")):
-                pixmap = QPixmap(path)
-                self.label.setPixmap(pixmap.scaled(
-                    self.label.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation))
-                self.search_img = path
-                self.paginate = 0
-                self.populate_closest()
-                break
+    #         if path.lower().endswith((".png", ".jpg", ".jpeg", ".bmp", ".gif")):
+    #             pixmap = QPixmap(path)
+    #             self.label.setPixmap(pixmap.scaled(
+    #                 self.label.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation))
+    #             self.search_img = path
+    #             self.paginate = 0
+    #             self.populate_closest()
+    #             break
     
     def scrolled(self, value):
         if value >= self.scroll_bar.maximum()*0.95:
@@ -165,20 +249,20 @@ class ImageDropWidget(QWidget):
             self.populate_closest()
             
     def make_slider(self, name, minV, maxV):
-        s = QWidget()
-        l = QHBoxLayout(s)
         label = QLabel(name)
-        v_label = QLabel("0")
+        label.setStyleSheet("padding: 6px; font-size: 32pt;")
+        v_label = QLabel(f"{maxV}/{maxV-maxV}")
+        v_label.setStyleSheet("padding: 6px; font-size: 32pt;")
         slider = QSlider(Qt.Horizontal)
-        slider.setValue(0)
+        slider.setStyleSheet("padding: 6px;")
         slider.setMinimum(minV)
         slider.setMaximum(maxV)
-        slider.valueChanged.connect(lambda value: v_label.setText(str(value)))
-        l.addWidget(label)
-        l.addWidget(slider)
-        l.addWidget(v_label)
-        self.control_panel_layout.addWidget(s)
-        return s
+        slider.setValue(maxV)
+        slider.valueChanged.connect(lambda value: v_label.setText(f"{value}/{maxV-value}"))
+        self.control_panel_layout.addWidget(label)
+        self.control_panel_layout.addWidget(slider)
+        self.control_panel_layout.addWidget(v_label)
+        return slider
         
     def populate_closest(self):
         idx = 0 
@@ -191,7 +275,9 @@ class ImageDropWidget(QWidget):
                 label.setAlignment(Qt.AlignCenter)
                 label.setStyleSheet("border: 1px solid #ccc;")
                 label.setPixmap(pixmaps[idx])
-                self.images_layout.addWidget(label, row+GRID_SIZE*self.paginate, col)
+                items_before = (GRID_SIZE**2 + GRID_SIZE) + (self.paginate - 1) * (GRID_SIZE**2) if self.paginate > 0 else 0
+                row_offset = items_before // GRID_SIZE
+                self.images_layout.addWidget(label, row + row_offset, col)
                 idx += 1
 
 
@@ -199,11 +285,10 @@ if __name__ == "__main__":
     app = QApplication(sys.argv)
     db = DBController(Path("test.db"),
                   Path('Index_db.faiss'),
-                  Path("models/binflat.faiss"),
-                  Path("models/byol_256.pth"),
+                  Path("models/sift_kmeans.faiss"),
                   Path("/Volumes/Big Data/data"),
                   threads=4, estimated_load=200_000,
-                  orb_length=1024, color_length=0, byol_length=0)
+                  feat_length=512, color_length=26, dino_length=384)
     widget = ImageDropWidget(db, "/Volumes/Big Data/data")
     widget.show()
     sys.exit(app.exec())
