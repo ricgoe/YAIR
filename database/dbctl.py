@@ -1,10 +1,10 @@
 from pathlib import Path
 from sqlmodel import SQLModel, create_engine, Session
 from database.image_model import ImgEntry, ImgConvertFailure
-from database.colorvec import ColorVecCalculator
+from features import ColorVecCalculator, OrbVecCalculator, BYOLVecCalculator
 # from embeddings import Embedder
 # from autoenc import AutoEncoder
-from faiss import IndexFlatIP, IndexFlatL2, IndexIDMap
+from faiss import IndexFlatIP, IndexIDMap
 import faiss
 from tqdm import tqdm
 import numpy as np
@@ -13,28 +13,39 @@ import threading
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import select, func
 from threadables import Enqueuer, Worker, worker
+import sys
+import cv2 as cv
+from database import ImgConvertFailure
+from PIL import Image
 
 class DBController:
-    def __init__(self, db_path: str, index_path: Path, img_drive_path: Path, threads = 4,  estimated_load = None):
+    def __init__(self, db_path: str, index_path: Path, kmeans_path: Path, byol_path: Path, img_drive_path: Path, threads = 4,  estimated_load = None, orb_length=500, color_length=26, byol_length=256, cap: int = 1000):
         # just_fix_windows_console() # colorama fix, does nothing on unix
         self.engine = create_engine(f"sqlite:///{db_path}")
         SQLModel.metadata.create_all(self.engine)
-        self.idx = faiss.read_index(str(index_path)) if index_path.is_file() else IndexIDMap(IndexFlatIP(26))
+        self.idx = faiss.read_index(str(index_path)) if index_path.is_file() else IndexIDMap(IndexFlatIP(orb_length+color_length+byol_length))
         # self.embedder = Embedder(model_path="/Users/richardgox/Documents/4. Semester/GuglLens/database/autoencoder_full_131_best.pth")
-        self.colorvec = ColorVecCalculator()
+        self.vector_length = orb_length
         self.files_to_process = Queue(maxsize=threads+1)
         self.vectors_to_index = Queue()
-        self.images_done = 0
-        self.worker_done = 0
-        self.img_drive_path = img_drive_path
         self.index_path = index_path
+        self.img_drive_path = img_drive_path
         self.threads = threads
+        self.worker_done = 0
         self.kill_switch = threading.Event()
+        self.images_done = 0
         self.tqdm = None
         if estimated_load:
             with Session(self.engine) as session:
-                estimated_load -=session.exec(select(func.count(ImgEntry.id))).one()
-            self.tqdm = tqdm(total=estimated_load)
+               initial=session.exec(select(func.count(ImgEntry.id))).one()
+            self.tqdm = tqdm(total=estimated_load, ncols=80, dynamic_ncols=False, initial=initial, smoothing=1, mininterval=10, file=sys.stdout)
+        self.colorvec = ColorVecCalculator(color_length)
+        self.kmeans_path = kmeans_path
+        self.kmeans = faiss.read_index(str(kmeans_path)) if kmeans_path.is_file() else print("No kmeans trained")
+        self.orbvec = OrbVecCalculator(self.kmeans, self.vector_length)
+        self.byol_length = byol_length
+        self.byolvec = BYOLVecCalculator(byol_path)
+        self.cap = cap
 
     def populate_db(self, n=None):
         Enqueuer(self.files_to_process, self.img_drive_path.rglob("*"), self.filter_image_duplicates, self.threads, n, self.kill_switch).start()
@@ -46,7 +57,8 @@ class DBController:
             worker(self.vectors_to_index, self.write_to_db, self.on_worker_done, self.kill_switch) # work non-wrapped to execute in main thread
         except KeyboardInterrupt:
             self.kill_switch.set()
-        faiss.write_index(self.idx, str(self.index_path))
+        finally:
+            faiss.write_index(self.idx, str(self.index_path))
         
     def filter_image_duplicates(self, img_path: Path):
         if not img_path.is_file(): return False
@@ -63,7 +75,7 @@ class DBController:
                 session.add(img)
                 session.flush()
                 session.refresh(img)
-    
+
                 faiss.normalize_L2(vec)
                 self.idx.add_with_ids(vec, img.id)
             except Exception as e:
@@ -80,14 +92,24 @@ class DBController:
                 
     def enqueue_vec(self, img_path: Path) -> None:
         try:
-            vec, height, width = self.colorvec.gen_color_vec(img_path)
-            # TODO concatinate with embeddings and weight properly
+            vec, height, width = self.get_vec(str(img_path))
             self.vectors_to_index.put((img_path, height, width, vec))
-        except ImgConvertFailure as e:
-            print(e)
+        except Exception as e:
+            print(f"Failed to process {str(img_path)}: {e}", file=sys.stderr)
             
-    def get_vec(self, img_path: Path):
-        return self.colorvec.gen_color_vec(img_path)
+    def get_vec(self, img_path: str):
+        img = Image.open(img_path).convert('RGB')
+        arr = np.array(img)
+        scale = self.cap / max(arr.shape)
+        if scale < 1:
+            arr = cv.resize(arr, None, fx=scale, fy=scale, interpolation=cv.INTER_AREA)
+        cvec = self.colorvec.gen_color_vec(arr)
+        arr_g = cv.cvtColor(arr, cv.COLOR_RGB2GRAY)
+        ovec = self.orbvec.gen_orb_vec(arr_g)
+        bvec = self.byolvec.gen_byol_vec(arr_g)
+        if bvec.shape[1] != self.byol_length: 
+            raise ValueError(f"Mismatch between expected length '{self.byol_length}' and actual length '{bvec.shape[1]}'")
+        return np.concatenate((cvec, ovec, bvec), axis=1), img.height, img.width 
 
     def get_closest_from_db(self, img_path: Path, k: int) -> list[str]:
         vec, _, _ = self.get_vec(img_path)
@@ -102,8 +124,45 @@ class DBController:
         if len(imgs) < k: imgs.append(None)
         return imgs
                 
+    def build_orb_kmeans(self, n=None):
+        Enqueuer(self.files_to_process, self.img_drive_path.rglob("*"), self.filter_image_duplicates, self.threads, n, self.kill_switch).start()
+        for _ in range(self.threads):
+            Worker(self.files_to_process, self.enqueue_orb, self.on_worker_done, self.kill_switch).start()
+        orbis = []
+        def append_orb(vec):
+            if (i:=len(orbis)) % 10 == 0:
+                print(i, "done")
+            orbis.append(vec)
+        try:
+            worker(self.vectors_to_index, append_orb, lambda: print("main_done"), self.kill_switch)
+            print(f"list done with {len(orbis)} elements")
+            arr = np.vstack(orbis)
+            print("vstack done", arr.shape)
+            np.save("orbis-128threads.npy", arr)
+            km = faiss.Kmeans(arr.shape[1], self.vector_length, niter=25, verbose = True, gpu=True, max_points_per_centroid=600000)
+            km.train(arr)
+            _, d = km.centroids.shape
+            index = faiss.IndexFlatL2(d)
+            index.add(km.centroids)
+            faiss.write_index(index, str(self.kmeans_path))
+            self.worker_done = 0
+        except KeyboardInterrupt:
+            np.save("backup-kmeans.npy", arr)
+            self.kill_switch.set()
+        print("finished-building orb")
+        return index
+    
+    
+    
+    def enqueue_orb(self, path:Path):
+        try:
+            vec, _, _ = OrbVecCalculator.gen_internal_embedding(str(path), self.vector_length)
+            if vec is None: return
+            self.vectors_to_index.put(vec)
+        except ImgConvertFailure as e:
+            print(str(path), file=sys.stderr)
         
-                    
+     
     def on_worker_done(self):
         self.worker_done += 1
         if self.worker_done >= self.threads:
@@ -115,5 +174,4 @@ if __name__ == "__main__":
     # db = ImgDBMaker(Path("test.db"), Path('Index_db.faiss'), Path("/Volumes/Big Data/data/image_data"))
     db = DBController(Path("test.db"), Path('Index_db.faiss'), Path("images"), threads=4, estimated_load=540_000)
     # start = time.time()
-    db.populate_db(n=100)
     # print(time.time()-start)

@@ -10,3 +10,9 @@ res
 archive
 test.db
 Index*
+*.npy
+*.faiss
+logs
+images
+autoencoder
+*.db
