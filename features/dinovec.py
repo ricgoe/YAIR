@@ -1,5 +1,5 @@
 import numpy as np
-#from database import ImgConvertFailure
+from database import ImgConvertFailure
 import torch
 from pathlib import Path
 from torchvision.transforms import transforms
@@ -22,8 +22,8 @@ class DINOVecCalculator:
         ])
 
         
-    def gen_byol_vec(self, img: np.ndarray):
-        cvt = self.tfm(img).expand(3, -1, -1)
+    def gen_dino_vec(self, img: np.ndarray):
+        cvt = self.tfm(img)
         with torch.no_grad():
             vec = self.model(cvt.unsqueeze(0).to(self.dev))
         vec = vec.squeeze(0).cpu().numpy().reshape(1, -1)
@@ -37,5 +37,5 @@ if __name__ == "__main__":
     img = Image.open(patg)
     arr = np.array(img)
     arr_g = cv.cvtColor(arr, cv.COLOR_RGB2GRAY)
-    a=cvc.gen_byol_vec(arr)
-    print(a[0].shape)
+    a=cvc.gen_dino_vec(arr)
+    print(a)
