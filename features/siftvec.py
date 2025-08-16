@@ -1,6 +1,6 @@
 import cv2 as cv
 import numpy as np
-# from database import ImgConvertFailure
+from database import ImgConvertFailure
 
 
 class SiftVecCalculator:
@@ -12,7 +12,7 @@ class SiftVecCalculator:
     def gen_sift_vec(self, img: np.ndarray):
         embedding = SiftVecCalculator.gen_internal_embedding(img, self.vector_length)
         if embedding is None:
-            embedding = np.zeros((500,128))
+            embedding = np.zeros((self.vector_length,128))
         _, label = self.kmeans.search(embedding, 1)
         label = label.ravel()
         vec = np.bincount(label, minlength=self.vector_length)
