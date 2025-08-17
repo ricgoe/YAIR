@@ -8,8 +8,7 @@ from torchvision.transforms import transforms
 class DINOVecCalculator:
     
     def __init__(self):
-        # self.dev = 'cuda' if torch.cuda.is_available() else 'cpu'
-        self.dev = 'cpu'
+        self.dev = 'cuda' if torch.cuda.is_available() else 'cpu'
         print(f'Inference running on {self.dev}')
         self.model = torch.hub.load('facebookresearch/dinov2', 'dinov2_vits14')
         IMAGENET_MEAN = [0.485, 0.456, 0.406]

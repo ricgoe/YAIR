@@ -1,6 +1,6 @@
 .venv
 images
-.faafo*
+.*
 matrices
 prasi
 .DS_Store
@@ -18,3 +18,4 @@ autoencoder
 *.db
 .conda
 models
+*.code-workspace
