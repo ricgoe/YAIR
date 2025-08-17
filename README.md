@@ -35,3 +35,5 @@ Drag'n'Drop Image onto GUI and enjoy! 😜
 3. Query: Extraktion → Normalisierung → Suche im Index  
 4. Rückgabe der Top-k ähnlichen Bilder
 5. Anzeige in GUI
+
+![code-diagramm](https://github.com/user-attachments/assets/e0dabeb4-1757-402f-babe-5c66e554eb2d)
