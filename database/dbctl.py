@@ -25,8 +25,8 @@ class DBController:
         
         self.kmeans_path = kmeans_path
         self.index_path = index_path
-        self.idx = faiss.read_index(index_path.resolve()) if index_path.is_file() else IndexIDMap(IndexFlatIP(feat_length+color_length+dino_length))
-        self.kmeans = faiss.read_index(kmeans_path.resolve()) if kmeans_path.is_file() else print("No kmeans trained")
+        self.idx = faiss.read_index(str(index_path.resolve())) if index_path.is_file() else IndexIDMap(IndexFlatIP(feat_length+color_length+dino_length))
+        self.kmeans = faiss.read_index(str(kmeans_path.resolve())) if kmeans_path.is_file() else print("No kmeans trained")
         
         self.threads = threads
         self.files_to_process = Queue(maxsize=threads+1)
@@ -62,7 +62,7 @@ class DBController:
         except KeyboardInterrupt:
             self.kill_switch.set()
         finally:
-            faiss.write_index(self.idx, self.index_path.resolve())
+            faiss.write_index(self.idx, str(self.index_path.resolve()))
         
     def filter_image_duplicates(self, img_path: Path) -> bool:
         """
@@ -115,7 +115,7 @@ class DBController:
                 session.commit()
         self.images_done += 1
         if self.tqdm: self.tqdm.update(1)
-        if self.images_done % 500 == 0: faiss.write_index(self.idx, self.index_path.resolve())
+        if self.images_done % 500 == 0: faiss.write_index(self.idx, str(self.index_path.resolve()))
                 
     def enqueue_vec(self, img_path: Path) -> None:
         """
@@ -125,7 +125,7 @@ class DBController:
             img_path (Path): Path to the image.
         """
         try:
-            path = img_path.resolve()
+            path = str(img_path.resolve())
             vec, height, width = self.get_vec(path)
             self.vectors_to_index.put((img_path, height, width, vec))
         except Exception as e:
@@ -236,7 +236,7 @@ class DBController:
             _, d = km.centroids.shape
             index = faiss.IndexFlatL2(d)
             index.add(km.centroids)
-            faiss.write_index(index, self.kmeans_path.resolve())
+            faiss.write_index(index, str(self.kmeans_path.resolve()))
             self.worker_done = 0
         except KeyboardInterrupt:
             np.save("backup-kmeans.npy", arr)

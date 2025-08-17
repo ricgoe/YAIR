@@ -66,7 +66,7 @@ class ScalerWorker(QRunnable):
             finished (list[QPixmap | None]): List of loaded and scaled pixmaps.
         """
         results = [ # of form [(path, pixmap), ...]
-            QPixmap(Path(self.location, *Path(path).parts).resolve()).scaled(
+            QPixmap(str(Path(self.location, *Path(path).parts).resolve())).scaled(
                 self.size,
                 Qt.KeepAspectRatio,
                 Qt.SmoothTransformation
@@ -289,7 +289,7 @@ class ImageDropWidget(QWidget):
             return cache
         else:
             pixmaps = [
-                QPixmap(Path(self.location, *Path(path).parts).resolve()).scaled(
+                QPixmap(str(Path(self.location, *Path(path).parts).resolve())).scaled(
                     self.images.size() / (GRID_SIZE+0.5),
                     Qt.KeepAspectRatio,
                     Qt.SmoothTransformation
