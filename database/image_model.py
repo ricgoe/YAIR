@@ -6,8 +6,3 @@ class ImgEntry(SQLModel, table = True):
     width: int = Field(default=None)
     height: int = Field(default=None)
     #faiss_id: int
-
-class ImgConvertFailure(Exception):
-    def __init__(self, file, error):
-        super().__init__(f"Failed to convert {file}\n\t at {error}")
-        

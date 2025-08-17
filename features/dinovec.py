@@ -1,5 +1,4 @@
 import numpy as np
-from database import ImgConvertFailure
 import torch
 from pathlib import Path
 from torchvision.transforms import transforms
