@@ -1,6 +1,6 @@
 from pathlib import Path
 from sqlmodel import SQLModel, create_engine, Session
-from database.image_model import ImgEntry, ImgConvertFailure
+from database import ImgEntry
 from features import ColorVecCalculator, OrbVecCalculator, SiftVecCalculator, DINOVecCalculator
 from faiss import IndexFlatIP, IndexIDMap
 import faiss
@@ -13,7 +13,6 @@ from sqlmodel import select, func
 from threadables import Enqueuer, Worker, worker
 import sys
 import cv2 as cv
-from database import ImgConvertFailure
 from PIL import Image
 
 class DBController:
@@ -26,8 +25,8 @@ class DBController:
         
         self.kmeans_path = kmeans_path
         self.index_path = index_path
-        self.idx = faiss.read_index(str(index_path)) if index_path.is_file() else IndexIDMap(IndexFlatIP(feat_length+color_length+dino_length))
-        self.kmeans = faiss.read_index(str(kmeans_path)) if kmeans_path.is_file() else print("No kmeans trained")
+        self.idx = faiss.read_index(index_path.resolve()) if index_path.is_file() else IndexIDMap(IndexFlatIP(feat_length+color_length+dino_length))
+        self.kmeans = faiss.read_index(kmeans_path.resolve()) if kmeans_path.is_file() else print("No kmeans trained")
         
         self.threads = threads
         self.files_to_process = Queue(maxsize=threads+1)
@@ -57,18 +56,18 @@ class DBController:
         except KeyboardInterrupt:
             self.kill_switch.set()
         finally:
-            faiss.write_index(self.idx, str(self.index_path))
+            faiss.write_index(self.idx, self.index_path.resolve())
         
     def filter_image_duplicates(self, img_path: Path):
         if not img_path.is_file(): return False
         with Session(self.engine) as session:
-            exists = session.exec(select(ImgEntry).where(ImgEntry.path == str(img_path))).first()
+            exists = session.exec(select(ImgEntry).where(ImgEntry.path == img_path.relative_to(self.img_drive_path))).first()
             if exists: return False
         return True
     
     def write_to_db(self, result: tuple[Path, np.ndarray]):
         img_path, height, width, vec = result
-        img = ImgEntry(path=str(img_path), width=width, height=height)
+        img = ImgEntry(path=img_path.relative_to(self.img_drive_path), width=width, height=height)
         with Session(self.engine) as session:
             try:
                 session.add(img)
@@ -86,14 +85,15 @@ class DBController:
                 session.commit()
         self.images_done += 1
         if self.tqdm: self.tqdm.update(1)
-        if self.images_done % 500 == 0: faiss.write_index(self.idx, str(self.index_path))
+        if self.images_done % 500 == 0: faiss.write_index(self.idx, self.index_path.resolve())
                 
     def enqueue_vec(self, img_path: Path) -> None:
         try:
-            vec, height, width = self.get_vec(str(img_path))
+            path = img_path.resolve()
+            vec, height, width = self.get_vec(path)
             self.vectors_to_index.put((img_path, height, width, vec))
         except Exception as e:
-            print(f"Failed to process {str(img_path)}: {e}", file=sys.stderr)
+            print(f"Failed to process {path}: {e}", file=sys.stderr)
             
     def get_vec(self, img_path: Path):
         img = Image.open(img_path).convert('RGB')
@@ -137,7 +137,7 @@ class DBController:
         if self.estimated_load:
             self.tqdm = tqdm(total=self.estimated_load, ncols=80, dynamic_ncols=False, smoothing=1, mininterval=10, file=sys.stdout)
         if n: self.tqdm.total = n
-        Enqueuer(self.files_to_process, self.img_drive_path.rglob("*"), self.filter_image_duplicates, self.threads, n, self.kill_switch).start()
+        Enqueuer(self.files_to_process, self.img_drive_path.rglob("*"), lambda p: p.is_file(), self.threads, n, self.kill_switch).start()
         for _ in range(self.threads):
             Worker(self.files_to_process, lambda path: self.enqueue_feat_vec(path, mode), self.on_worker_done, self.kill_switch).start()
         orbis = []
@@ -156,7 +156,7 @@ class DBController:
             _, d = km.centroids.shape
             index = faiss.IndexFlatL2(d)
             index.add(km.centroids)
-            faiss.write_index(index, str(self.kmeans_path))
+            faiss.write_index(index, self.kmeans_path.resolve())
             self.worker_done = 0
         except KeyboardInterrupt:
             np.save("backup-kmeans.npy", arr)
@@ -179,8 +179,8 @@ class DBController:
             vec, _, _ = calculator.gen_internal_embedding(arr, self.vector_length)
             if vec is None: return
             self.vectors_to_index.put(vec)
-        except ImgConvertFailure as e:
-            print(str(path), file=sys.stderr)
+        except Exception:
+            print(path, file=sys.stderr)
         
      
     def on_worker_done(self):
