@@ -21,36 +21,38 @@ class DBController:
         # just_fix_windows_console() # colorama fix, does nothing on unix
         self.engine = create_engine(f"sqlite:///{db_path}")
         SQLModel.metadata.create_all(self.engine)
-        self.idx = faiss.read_index(str(index_path)) if index_path.is_file() else IndexIDMap(IndexFlatIP(feat_length+color_length+dino_length))
+        self.img_drive_path = img_drive_path
         self.vector_length = feat_length
+        
+        self.kmeans_path = kmeans_path
+        self.index_path = index_path
+        self.idx = faiss.read_index(str(index_path)) if index_path.is_file() else IndexIDMap(IndexFlatIP(feat_length+color_length+dino_length))
+        self.kmeans = faiss.read_index(str(kmeans_path)) if kmeans_path.is_file() else print("No kmeans trained")
+        
+        self.threads = threads
         self.files_to_process = Queue(maxsize=threads+1)
         self.vectors_to_index = Queue()
-        self.index_path = index_path
-        self.img_drive_path = img_drive_path
-        self.threads = threads
-        self.worker_done = 0
         self.kill_switch = threading.Event()
+        self.worker_done = 0
         self.images_done = 0
-        self.tqdm = None
-        if estimated_load:
-            with Session(self.engine) as session:
-               initial=session.exec(select(func.count(ImgEntry.id))).one()
-            self.tqdm = tqdm(total=estimated_load, ncols=80, dynamic_ncols=False, initial=initial, smoothing=1, mininterval=10, file=sys.stdout)
-        self.colorvec = ColorVecCalculator(color_length)
-        self.kmeans_path = kmeans_path
-        self.kmeans = faiss.read_index(str(kmeans_path)) if kmeans_path.is_file() else print("No kmeans trained")
-        self.siftvec = SiftVecCalculator(self.kmeans, self.vector_length)
+        
         self.dino_length = dino_length
         self.dinovec = DINOVecCalculator()
+        self.siftvec = SiftVecCalculator(self.kmeans, self.vector_length)
+        self.colorvec = ColorVecCalculator(color_length)
         self.cap = cap
+        self.estimated_load = estimated_load
 
     def populate_db(self, n=None):
+        if self.estimated_load:
+            with Session(self.engine) as session:
+               initial=session.exec(select(func.count(ImgEntry.id))).one()
+            self.tqdm = tqdm(total=self.estimated_load, ncols=80, dynamic_ncols=False, initial=initial, smoothing=1, mininterval=10, file=sys.stdout)
+        if n: self.tqdm.total = n
         Enqueuer(self.files_to_process, self.img_drive_path.rglob("*"), self.filter_image_duplicates, self.threads, n, self.kill_switch).start()
         for _ in range(self.threads):
             Worker(self.files_to_process, self.enqueue_vec, self.on_worker_done, self.kill_switch).start() # calculate vector and write to output queue
         try:
-            if self.tqdm and n: 
-                self.tqdm.total = n
             worker(self.vectors_to_index, self.write_to_db, self.on_worker_done, self.kill_switch) # work non-wrapped to execute in main thread
         except KeyboardInterrupt:
             self.kill_switch.set()
@@ -124,15 +126,17 @@ class DBController:
             faiss.normalize_L2(vec)
         _, I = self.idx.search(vec, k)
         with Session(self.engine) as session:
-            imgs = []
-            for i in I[0]:
-                img = session.get(ImgEntry, int(i))
-                if img:
-                    imgs.append(img.path)
+            ids = [int(id) for id in I[0]]
+            results = session.exec(select(ImgEntry).where(ImgEntry.id.in_(ids)))
+            results_map = {img.id: img.path for img in results}
+            imgs = [results_map[key] for key in ids if key in results_map]
         if len(imgs) < k: imgs.append(None)
         return imgs
                 
     def build_feat_kmeans(self, n=None, mode="orb"):
+        if self.estimated_load:
+            self.tqdm = tqdm(total=self.estimated_load, ncols=80, dynamic_ncols=False, smoothing=1, mininterval=10, file=sys.stdout)
+        if n: self.tqdm.total = n
         Enqueuer(self.files_to_process, self.img_drive_path.rglob("*"), self.filter_image_duplicates, self.threads, n, self.kill_switch).start()
         for _ in range(self.threads):
             Worker(self.files_to_process, lambda path: self.enqueue_feat_vec(path, mode), self.on_worker_done, self.kill_switch).start()
