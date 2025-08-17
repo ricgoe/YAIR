@@ -22,7 +22,6 @@ class DBController:
         self.engine = create_engine(f"sqlite:///{db_path}")
         SQLModel.metadata.create_all(self.engine)
         self.idx = faiss.read_index(str(index_path)) if index_path.is_file() else IndexIDMap(IndexFlatIP(feat_length+color_length+dino_length))
-        # self.embedder = Embedder(model_path="/Users/richardgox/Documents/4. Semester/GuglLens/database/autoencoder_full_131_best.pth")
         self.vector_length = feat_length
         self.files_to_process = Queue(maxsize=threads+1)
         self.vectors_to_index = Queue()
@@ -123,15 +122,15 @@ class DBController:
             faiss.normalize_L2(vec2)
             vec = vec * mix + vec2 * (1-mix)
             faiss.normalize_L2(vec)
-        _, I = self.idx.search(vec, k+1)
+        _, I = self.idx.search(vec, k)
         with Session(self.engine) as session:
             imgs = []
             for i in I[0]:
                 img = session.get(ImgEntry, int(i))
                 if img:
                     imgs.append(img.path)
-        if len(imgs) < k+1: imgs.append(None)
-        return imgs[1:]
+        if len(imgs) < k: imgs.append(None)
+        return imgs
                 
     def build_feat_kmeans(self, n=None, mode="orb"):
         Enqueuer(self.files_to_process, self.img_drive_path.rglob("*"), self.filter_image_duplicates, self.threads, n, self.kill_switch).start()
