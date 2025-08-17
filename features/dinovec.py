@@ -1,6 +1,5 @@
 import numpy as np
 import torch
-from pathlib import Path
 from torchvision.transforms import transforms
 
 
@@ -20,7 +19,16 @@ class DINOVecCalculator:
         ])
 
         
-    def gen_dino_vec(self, img: np.ndarray):
+    def gen_dino_vec(self, img: np.ndarray) -> np.ndarray:
+        """
+        Generate a DINOv2 embedding vector from an RGB image using ViT-S/14.
+
+        Args:
+            img (np.ndarray): RGB image as a NumPy array of shape (H, W, 3).
+
+        Returns:
+            np.ndarray: DINOv2 feature vector of shape (1, 384).
+        """
         cvt = self.tfm(img)
         with torch.no_grad():
             vec = self.model(cvt.unsqueeze(0).to(self.dev))

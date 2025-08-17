@@ -42,7 +42,13 @@ class DBController:
         self.cap = cap
         self.estimated_load = estimated_load
 
-    def populate_db(self, n=None):
+    def populate_db(self, n=None) -> None:
+        """
+        Populate the database with feature vectors from the image directory.
+
+        Args:
+            n (int, optional): Limit number of images to process. If None, processes all.
+        """
         if self.estimated_load:
             with Session(self.engine) as session:
                initial=session.exec(select(func.count(ImgEntry.id))).one()
@@ -58,14 +64,38 @@ class DBController:
         finally:
             faiss.write_index(self.idx, self.index_path.resolve())
         
-    def filter_image_duplicates(self, img_path: Path):
+    def filter_image_duplicates(self, img_path: Path) -> bool:
+        """
+        Check if the image path already exists in the database.
+
+        Args:
+            img_path (Path): Path to the image.
+
+        Returns:
+            bool: True if the image is not a duplicate and should be processed.
+        """
         if not img_path.is_file(): return False
         with Session(self.engine) as session:
             exists = session.exec(select(ImgEntry).where(ImgEntry.path == img_path.relative_to(self.img_drive_path))).first()
             if exists: return False
         return True
     
-    def write_to_db(self, result: tuple[Path, np.ndarray]):
+    def write_to_db(self, result: tuple[Path, np.ndarray]) -> None:
+        """
+        Add a processed image entry and its feature vector to the database and FAISS index.
+
+        - Adds image metadata (path, width, height) to the SQLite database.
+        - Inserts the corresponding image feature vector into the FAISS index using the image ID.
+        - Handles potential exceptions during database insertions and ensures consistency between
+        the database and the FAISS index.
+
+        If an error occurs (e.g., duplicate image, DB integrity issue), the function:
+        - Rolls back the database transaction.
+        - Removes the vector from the FAISS index if the image ID was already allocated.
+
+        Args:
+            result (tuple): Tuple containing image path, height, width, and feature vector.
+        """
         img_path, height, width, vec = result
         img = ImgEntry(path=img_path.relative_to(self.img_drive_path), width=width, height=height)
         with Session(self.engine) as session:
@@ -88,6 +118,12 @@ class DBController:
         if self.images_done % 500 == 0: faiss.write_index(self.idx, self.index_path.resolve())
                 
     def enqueue_vec(self, img_path: Path) -> None:
+        """
+        Compute and queue the feature vector for indexing.
+
+        Args:
+            img_path (Path): Path to the image.
+        """
         try:
             path = img_path.resolve()
             vec, height, width = self.get_vec(path)
@@ -95,7 +131,29 @@ class DBController:
         except Exception as e:
             print(f"Failed to process {path}: {e}", file=sys.stderr)
             
-    def get_vec(self, img_path: Path):
+    def get_vec(self, img_path: Path) -> tuple[np.ndarray, int, int]:
+        """
+        Compute the final fused feature vector for an image by combining multiple visual descriptors.
+
+        This function:
+        - Loads and optionally resizes the input image based on a max dimension cap.
+        - Converts the image to grayscale for use with SIFT.
+        - Extracts three different types of features:
+            1. DINOv2 deep features (384-dim)
+            2. Color histogram features in HLS space ()
+            3. SIFT-based bag-of-visual-words histogram
+        - Each vector is L2-normalized and weighted according to predefined ratios.
+        - All weighted vectors are concatenated into a single final feature vector.
+
+        Args:
+            img_path (Path): Path to the input image file.
+
+        Returns:
+            tuple:
+                - np.ndarray: The fused and normalized vector of shape (1, D), where D = dino_length + color_length + feat_length.
+                - int: Height of the image.
+                - int: Width of the image.
+        """
         img = Image.open(img_path).convert('RGB')
         arr = np.array(img)
         scale = self.cap / max(arr.shape)
@@ -117,6 +175,18 @@ class DBController:
         return vec, img.height, img.width 
 
     def get_closest_from_db(self, img_path: Path, k: int, img_path2: Path = None, mix: float = None) -> list[str]:
+        """
+        Retrieve the top-k most similar images from the FAISS index.
+
+        Args:
+            img_path (Path): Path to the query image.
+            k (int): Number of closest matches to retrieve.
+            img_path2 (Path, optional): Second image for mixing.
+            mix (float, optional): Weight for mixing vectors from two images.
+
+        Returns:
+            list[str]: List of image paths corresponding to top-k matches.
+        """
         vec, _, _ = self.get_vec(img_path)
         faiss.normalize_L2(vec)
         if img_path2 and mix is not None:
@@ -133,7 +203,17 @@ class DBController:
         if len(imgs) < k: imgs.append(None)
         return imgs
                 
-    def build_feat_kmeans(self, n=None, mode="orb"):
+    def build_feat_kmeans(self, n=None, mode="orb") -> faiss.IndexFlatL2:
+        """
+        Build a k-means model from feature vectors (ORB or SIFT) and save the index.
+
+        Args:
+            n (int, optional): Number of images to use for training.
+            mode (str): Feature mode, 'orb' or 'sift'.
+
+        Returns:
+            faiss.IndexFlatL2: Trained FAISS index containing cluster centroids.
+        """
         if self.estimated_load:
             self.tqdm = tqdm(total=self.estimated_load, ncols=80, dynamic_ncols=False, smoothing=1, mininterval=10, file=sys.stdout)
         if n: self.tqdm.total = n
@@ -164,7 +244,14 @@ class DBController:
         print("finished-building orb")
         return index
     
-    def enqueue_feat_vec(self, path:Path, mode="orb"):
+    def enqueue_feat_vec(self, path:Path, mode="orb") -> None:
+        """
+        Extract and enqueue feature vector (ORB or SIFT) for clustering.
+
+        Args:
+            path (Path): Image path.
+            mode (str): Feature mode, either 'orb' or 'sift'.
+        """
         try:
             if mode == "orb":
                 calculator = OrbVecCalculator
@@ -183,7 +270,10 @@ class DBController:
             print(path, file=sys.stderr)
         
      
-    def on_worker_done(self):
+    def on_worker_done(self) -> None:
+        """
+        Callback when a worker thread finishes processing.
+        """
         self.worker_done += 1
         if self.worker_done >= self.threads:
             self.vectors_to_index.put(None)
