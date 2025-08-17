@@ -7,7 +7,7 @@
 </div>
 
 
-## Image Recommender – Big Data Engineering
+## YAIR (pronounced _yeah_) - Yet Another Image Recommender
 ### Überblick
 Im Rahmen des Moduls *Big Data Engineering* haben wir ein Content-Based *Image Recommender System* entwickelt. Ziel ist es, für ein Eingabebild die ähnlichsten Bilder aus einem Datensatz effizient zu finden.
 
