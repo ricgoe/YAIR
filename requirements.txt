@@ -1,0 +1,7 @@
+faiss-cpu==1.11.0
+pillow==11.2.1
+opencv-python==4.11.0.86
+sqlmodel==0.0.24
+tqdm==4.67.1
+PySide6==6.9.1
+#torch

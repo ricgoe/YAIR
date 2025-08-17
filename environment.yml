@@ -1,0 +1,17 @@
+name: GuglLens
+channels:
+  - defaults
+dependencies:
+  - python=3.10
+  - faiss-cpu
+  - torchvision
+  - pytorch
+  - pyside6
+  - sqlmodel
+  - tqdm
+  - opencv
+  - pytest
+  - bokeh
+  - panel
+  - holoviews
+  - datashader
