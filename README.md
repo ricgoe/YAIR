@@ -1,5 +1,6 @@
 > [!NOTE]  
 > Installation mit conda wird empfohlen. `conda env create -f environment.yml`
+> Danach ` git submodule update --init --recursive` um submodule threadables zu laden
 
 <div>
   <img width="45%" height="45%" alt="panda" src="https://github.com/user-attachments/assets/9041cf71-fc52-4b9a-ab5d-3f65b19ef181" />
